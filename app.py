@@ -6,17 +6,37 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# --- IMPORT DU MODULE RISK (GESTION D'ERREUR SI FICHIER MANQUANT) ---
+# ==========================================
+# 0. IMPORT DES MODULES (GESTION D'ERREUR)
+# ==========================================
+MODULES_STATUS = {"Risk": False, "Leverage": False}
+
 try:
     from modules.risk_metrics import RiskMetrics
-    RISK_MODULE_AVAILABLE = True
+    MODULES_STATUS["Risk"] = True
 except ImportError:
-    RISK_MODULE_AVAILABLE = False
-    # Mock class pour éviter le crash si le fichier n'est pas encore créé
+    pass
+
+try:
+    from modules.leverage_diagnostics import LeverageDiagnostics
+    MODULES_STATUS["Leverage"] = True
+except ImportError:
+    pass
+
+# Mock classes pour éviter le crash si les fichiers manquent
+if not MODULES_STATUS["Risk"]:
     class RiskMetrics:
         @staticmethod
-        def get_full_risk_profile(series):
-            return {}
+        def get_full_risk_profile(series): return {}
+
+if not MODULES_STATUS["Leverage"]:
+    class LeverageDiagnostics:
+        @staticmethod
+        def calculate_realized_beta(data, window=21): return pd.DataFrame()
+        @staticmethod
+        def calculate_leverage_health(data): return {}
+        @staticmethod
+        def detect_decay_regime(data, window=60): return pd.DataFrame()
 
 # ==========================================
 # 1. CONFIGURATION & CSS (DESIGN SILENT LUXURY)
@@ -85,7 +105,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. MOTEUR DE SIMULATION
+# 2. MOTEUR DE SIMULATION (CORE ENGINE)
 # ==========================================
 class BacktestEngine:
     @staticmethod
@@ -123,13 +143,10 @@ class BacktestEngine:
         for i in range(len(data)):
             # 1. Mise à jour Portfolio
             if i > 0:
-                # Protection division par zéro
-                if prices_x2[i-1] != 0:
-                    r_x2 = (prices_x2[i] - prices_x2[i-1]) / prices_x2[i-1]
+                if prices_x2[i-1] != 0: r_x2 = (prices_x2[i] - prices_x2[i-1]) / prices_x2[i-1]
                 else: r_x2 = 0
                 
-                if prices_x1[i-1] != 0:
-                    r_x1 = (prices_x1[i] - prices_x1[i-1]) / prices_x1[i-1]
+                if prices_x1[i-1] != 0: r_x1 = (prices_x1[i] - prices_x1[i-1]) / prices_x1[i-1]
                 else: r_x1 = 0
 
                 cash_x2 *= (1 + r_x2)
@@ -231,7 +248,7 @@ class BacktestEngine:
         return df_res, trades
 
 # ==========================================
-# 3. ANALYSES AVANCÉES
+# 3. ANALYSES & UTILS
 # ==========================================
 def calculate_metrics(series):
     if series.empty: return {"CAGR":0, "MaxDD":0, "Vol":0, "Final":0}
@@ -308,58 +325,36 @@ def run_monte_carlo(data, params, runs=100):
     return pd.DataFrame(results)
 
 # ==========================================
-# 4. DATA ENGINE (STRICTEMENT YAHOO)
+# 4. DATA ENGINE (STRICT YAHOO)
 # ==========================================
 @st.cache_data(ttl=3600)
 def get_data(tickers, start, end):
-    """
-    Récupère STRICTEMENT les données Yahoo.
-    Si ça échoue, renvoie vide et l'interface affichera une erreur.
-    Pas de données générées.
-    """
-    if not tickers:
-        return pd.DataFrame()
-
-    # Utilisation de group_by='ticker' pour stabiliser le format multi-colonnes
+    if not tickers: return pd.DataFrame()
     try:
         df = yf.download(tickers, start=start, end=end, progress=False, group_by='ticker', auto_adjust=True)
-    except Exception as e:
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
     prices = pd.DataFrame()
-
-    # Logique d'extraction Robuste
     if len(tickers) >= 2:
-        t_x2 = tickers[0]
-        t_x1 = tickers[1]
+        t_x2, t_x1 = tickers[0], tickers[1]
         
-        # 1. Cas Multi-Index (Le plus courant avec 2+ tickers)
+        # Gestion Robuste Flat vs MultiIndex
         if isinstance(df.columns, pd.MultiIndex):
             try:
-                # On vérifie si les tickers sont bien dans les colonnes (Attention à la casse)
-                cols = df.columns.levels[0]
-                if t_x2 in cols and t_x1 in cols:
+                if t_x2 in df.columns.levels[0] and t_x1 in df.columns.levels[0]:
                     prices['X2'] = df[t_x2]['Close']
                     prices['X1'] = df[t_x1]['Close']
-            except:
-                pass
-        
-        # 2. Cas Flat (Parfois Yahoo aplatit tout si un ticker échoue)
+            except: pass
         elif len(df.columns) >= 2:
-            # On prend les 2 premières colonnes en supposant que ce sont les Clôtures
             try:
                 prices['X2'] = df.iloc[:, 0]
                 prices['X1'] = df.iloc[:, 1]
-            except:
-                pass
+            except: pass
     
-    # Nettoyage final
-    prices = prices.ffill().dropna()
-    
-    return prices
+    return prices.ffill().dropna()
 
 # ==========================================
-# 5. UI LAYOUT
+# 5. UI LAYOUT PRINCIPAL
 # ==========================================
 
 # --- HEADER ---
@@ -368,10 +363,10 @@ st.markdown("""
     <div style="display:flex; justify-content:space-between; align-items:center;">
         <div>
             <h1 style="margin:0;" class="title-gradient">Predict. DISTINCT PROFILES</h1>
-            <p style="color:#888; margin:5px 0 0 0; font-size:12px;">ENGINE V2.0 • REAL MARKET DATA ONLY • RISK INTELLIGENCE</p>
+            <p style="color:#888; margin:5px 0 0 0; font-size:12px;">ENGINE V2.0 • RISK INTELLIGENCE • INSTITUTIONAL GRADE</p>
         </div>
         <div style="text-align:right;">
-            <span style="background:rgba(16, 185, 129, 0.1); color:#10b981; padding:5px 10px; border-radius:4px; font-size:11px; border:1px solid rgba(16, 185, 129, 0.2);">LIVE CONNECTED</span>
+            <span style="background:rgba(16, 185, 129, 0.1); color:#10b981; padding:5px 10px; border-radius:4px; font-size:11px; border:1px solid rgba(16, 185, 129, 0.2);">LIVE SYSTEM</span>
         </div>
     </div>
 </div>
@@ -379,12 +374,12 @@ st.markdown("""
 
 col_sidebar, col_main, col_valid = st.columns([1, 2.5, 1.2])
 
-# --- CONTROLS ---
+# --- SIDEBAR (CONTROLS) ---
 with col_sidebar:
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
     st.markdown("### ⚙️ CONFIGURATION")
     
-    t_input = st.text_input("Tickers (X2, X1)", "LQQ.PA, PUST.PA")
+    t_input = st.text_input("Tickers (X2 Risk, X1 Safe)", "LQQ.PA, PUST.PA")
     tickers = [t.strip().upper() for t in t_input.split(',')]
     
     start_d = st.date_input("Début", datetime(2022, 1, 1))
@@ -396,198 +391,135 @@ with col_sidebar:
     recov = st.slider("Recovery (%)", 10, 80, 30, 5)
     
     st.markdown("---")
-    st.markdown("### 📊 ALLOCATION")
     alloc_prud = st.slider("Prudence (X1%)", 0, 100, 50, 10)
     alloc_crash = st.slider("Crash (X1%)", 0, 100, 100, 10)
     
     st.markdown("---")
     profile = st.selectbox("PROFIL AI", ["DÉFENSIF", "ÉQUILIBRÉ", "AGRESSIF"])
     if st.button(f"🚀 OPTIMISER ({profile})"):
-        with st.spinner("Recherche des meilleurs paramètres..."):
+        with st.spinner("Recherche..."):
             if profile == "DÉFENSIF": st.session_state['opt_params'] = {'thresh': 3.0, 'panic': 12, 'recov': 50}
             elif profile == "AGRESSIF": st.session_state['opt_params'] = {'thresh': 8.0, 'panic': 20, 'recov': 20}
             else: st.session_state['opt_params'] = {'thresh': 5.0, 'panic': 15, 'recov': 30}
             st.rerun()
-            
     st.markdown('</div>', unsafe_allow_html=True)
 
-# --- DATA FETCHING (STRICT) ---
+# --- DATA FETCH ---
 data = get_data(tickers, start_d, end_d)
-
-# Params par défaut ou optimisés
 params = {
     'thresh': thresh, 'panic': panic, 'recovery': recov,
     'allocPrudence': alloc_prud, 'allocCrash': alloc_crash,
     'rollingWindow': 60, 'confirm': 2
 }
-
 if 'opt_params' in st.session_state:
     p = st.session_state['opt_params']
     st.sidebar.success(f"AI: Seuil {p['thresh']}% | Panic {p['panic']}% | Recov {p['recov']}%")
 
-
-# --- AFFICHAGE PRINCIPAL OU ERREUR ---
+# --- MAIN DISPLAY ---
 with col_main:
-    if not RISK_MODULE_AVAILABLE:
-        st.warning("⚠️ Module `risk_metrics.py` introuvable. Les métriques avancées (Ulcer, VaR) seront désactivées.")
-
     if data.empty or len(data) < 10:
-        # SI PAS DE DONNÉES RÉELLES, ON ARRÊTE TOUT ICI
-        st.error(f"""
-        ❌ **AUCUNE DONNÉE RÉCUPÉRÉE**
-        
-        Impossible de charger les données pour : **{', '.join(tickers)}**.
-        
-        **Causes possibles :**
-        1. Les tickers sont incorrects (ex: pour Euronext, ajoutez `.PA`, `.AS`).
-        2. La période sélectionnée ne contient pas de données.
-        3. Yahoo Finance bloque temporairement les requêtes.
-        
-        *Veuillez corriger les tickers à gauche.*
-        """)
-        
+        st.error(f"❌ **AUCUNE DONNÉE** pour {', '.join(tickers)}. Vérifiez les tickers ou la date.")
     else:
-        # SI DONNÉES OK, ON LANCE LE RESTE
+        # 1. Backtest
         df_res, trades = BacktestEngine.run_simulation(data, params)
         metrics = calculate_metrics(df_res['portfolio'])
         bench_met = calculate_metrics(df_res['benchX2'])
         
-        # --- NOUVEAU: RISK INTELLIGENCE (FROM MODULE 1) ---
-        if RISK_MODULE_AVAILABLE:
-            risk_strat = RiskMetrics.get_full_risk_profile(df_res['portfolio'])
-            risk_bench = RiskMetrics.get_full_risk_profile(df_res['benchX2'])
-        else:
-            risk_strat = {}
-            risk_bench = {}
-        # --------------------------------------------------
+        # 2. Risk & Leverage Calculation
+        risk_strat = RiskMetrics.get_full_risk_profile(df_res['portfolio'])
+        risk_bench = RiskMetrics.get_full_risk_profile(df_res['benchX2'])
+        lev_health = LeverageDiagnostics.calculate_leverage_health(data)
+        lev_beta = LeverageDiagnostics.calculate_realized_beta(data)
+        lev_decay = LeverageDiagnostics.detect_decay_regime(data)
 
-        # KPI ROW 1: Standard
+        # 3. KPI ROW 1: Performance
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("CAGR Strat", f"{metrics['CAGR']:.1f}%", delta=f"{metrics['CAGR']-bench_met['CAGR']:.1f}%")
         k2.metric("Max Drawdown", f"{metrics['MaxDD']:.1f}%", delta=f"{metrics['MaxDD']-bench_met['MaxDD']:.1f}%", delta_color="inverse")
         k3.metric("Volatilité", f"{metrics['Vol']:.1f}%")
         k4.metric("Trades", len(trades))
 
-        # KPI ROW 2: Advanced Risk (Institutional)
-        if RISK_MODULE_AVAILABLE:
-            st.markdown("### ⚠️ Institutional Risk Profile")
+        # 4. KPI ROW 2: Advanced Risk (Module 1)
+        if MODULES_STATUS["Risk"]:
+            st.markdown("### ⚠️ Profil de Risque (Institutionnel)")
             r1, r2, r3, r4 = st.columns(4)
-            r1.metric("Ulcer Index (Pain)", f"{risk_strat.get('Ulcer_Index', 0):.2f}", delta=f"{risk_strat.get('Ulcer_Index', 0)-risk_bench.get('Ulcer_Index', 0):.2f}", delta_color="inverse", help="Mesure la profondeur et la durée de la douleur")
-            r2.metric("VaR 95% (Daily)", f"{risk_strat.get('VaR_95', 0)*100:.2f}%", delta=f"{(risk_strat.get('VaR_95', 0)-risk_bench.get('VaR_95', 0))*100:.2f}%", delta_color="inverse")
+            r1.metric("Ulcer Index (Douleur)", f"{risk_strat.get('Ulcer_Index', 0):.2f}", delta=f"{risk_strat.get('Ulcer_Index', 0)-risk_bench.get('Ulcer_Index', 0):.2f}", delta_color="inverse")
+            r2.metric("VaR 95% (Jour)", f"{risk_strat.get('VaR_95', 0)*100:.2f}%", delta=f"{(risk_strat.get('VaR_95', 0)-risk_bench.get('VaR_95', 0))*100:.2f}%", delta_color="inverse")
             r3.metric("CVaR 95% (Tail)", f"{risk_strat.get('CVaR_95', 0)*100:.2f}%", delta=f"{(risk_strat.get('CVaR_95', 0)-risk_bench.get('CVaR_95', 0))*100:.2f}%", delta_color="inverse")
-            r4.metric("Annual Volatility", f"{risk_strat.get('Vol_Ann', 0)*100:.1f}%", delta=f"{(risk_strat.get('Vol_Ann', 0)-risk_bench.get('Vol_Ann', 0))*100:.1f}%", delta_color="inverse")
-        
-        # MAIN CHART
+            r4.metric("Volatilité Annuelle", f"{risk_strat.get('Vol_Ann', 0)*100:.1f}%", delta_color="inverse")
+
+        # 5. KPI ROW 3: Leverage Diagnostics (Module 2)
+        if MODULES_STATUS["Leverage"]:
+            st.markdown("### ⚙️ Efficacité du Levier (X2 vs X1)")
+            l1, l2, l3, l4 = st.columns(4)
+            real_beta = lev_health.get('Realized_Leverage', 0)
+            decay_val = lev_decay['Decay_Spread'].iloc[-1]*100 if not lev_decay.empty else 0
+            
+            l1.metric("Beta Réalisé", f"{real_beta:.2f}x", delta=f"{real_beta-2.0:.2f}", help="Cible: 2.0x")
+            l2.metric("Vol Ratio", f"{lev_health.get('Vol_Ratio', 0):.2f}x")
+            l3.metric("Decay (60J)", f"{decay_val:.2f}%", delta=f"{decay_val:.2f}%", delta_color="normal" if decay_val > 0 else "inverse", help="Positif = Alpha, Négatif = Drag")
+            l4.metric("Tracking Error", f"{lev_health.get('Tracking_Error', 0):.4f}")
+
+        # 6. CHART PRINCIPAL (Performance)
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df_res.index, y=df_res['portfolio'], mode='lines', name='STRATÉGIE', line=dict(color='#667eea', width=3), fill='tozeroy', fillcolor='rgba(102, 126, 234, 0.2)'))
+        fig.add_trace(go.Scatter(x=df_res.index, y=df_res['benchX2'], mode='lines', name=f'{tickers[0]} (RISK)', line=dict(color='#ef4444', width=1.5, dash='dot'), opacity=0.8))
+        fig.add_trace(go.Scatter(x=df_res.index, y=df_res['benchX1'], mode='lines', name=f'{tickers[1]} (SAFE)', line=dict(color='#10b981', width=1.5, dash='dot'), opacity=0.6))
         
-        # Strat
-        fig.add_trace(go.Scatter(
-            x=df_res.index, y=df_res['portfolio'], 
-            mode='lines', name='STRATÉGIE',
-            line=dict(color='#667eea', width=3),
-            fill='tozeroy', fillcolor='rgba(102, 126, 234, 0.2)'
-        ))
-        # Bench X2
-        fig.add_trace(go.Scatter(
-            x=df_res.index, y=df_res['benchX2'], 
-            mode='lines', name=f'{tickers[0]} (RISK)',
-            line=dict(color='#ef4444', width=1.5, dash='dot'),
-            opacity=0.8
-        ))
-        # Bench X1
-        fig.add_trace(go.Scatter(
-            x=df_res.index, y=df_res['benchX1'], 
-            mode='lines', name=f'{tickers[1]} (SAFE)',
-            line=dict(color='#10b981', width=1.5, dash='dot'),
-            opacity=0.6
-        ))
-
-        # Trades
         for t in trades:
             col = '#ef4444' if 'CRASH' in t['label'] else ('#f59e0b' if 'PRUDENCE' in t['label'] else '#10b981')
-            fig.add_annotation(
-                x=t['date'], y=df_res.loc[t['date']]['portfolio'],
-                text="▼" if t['to'] != 'R0' else "▲",
-                showarrow=False, font=dict(color=col, size=14)
-            )
-
-        fig.update_layout(
-            paper_bgcolor='rgba(0,0,0,0)', 
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(family="Inter", color='#888'),
-            height=450,
-            margin=dict(l=0, r=0, t=20, b=0),
-            xaxis=dict(showgrid=False, linecolor='#333'),
-            yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)'),
-            hovermode="x unified",
-            legend=dict(orientation="h", y=1.05, x=0)
-        )
+            fig.add_annotation(x=t['date'], y=df_res.loc[t['date']]['portfolio'], text="▼" if t['to'] != 'R0' else "▲", showarrow=False, font=dict(color=col, size=14))
+            
+        fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(family="Inter", color='#888'), height=450, margin=dict(l=0, r=0, t=20, b=0), xaxis=dict(showgrid=False, linecolor='#333'), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)'), hovermode="x unified", legend=dict(orientation="h", y=1.05, x=0))
         st.plotly_chart(fig, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Underwater
-        st.markdown("### 🌊 UNDERWATER PLOT")
+
+        # 7. CHART SECONDAIRE (Rolling Beta - Module 2)
+        if MODULES_STATUS["Leverage"] and not lev_beta.empty:
+            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+            fig_lev = go.Figure()
+            fig_lev.add_trace(go.Scatter(x=lev_beta.index, y=lev_beta['Realized_Beta'], mode='lines', name='Rolling Beta (21D)', line=dict(color='#A855F7', width=2)))
+            fig_lev.add_hline(y=2.0, line_dash="dot", line_color="white", annotation_text="Target 2x")
+            fig_lev.add_hrect(y0=0.0, y1=1.5, fillcolor="rgba(239, 68, 68, 0.1)", line_width=0, annotation_text="INEFFICIENCY", annotation_position="bottom right")
+            fig_lev.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(family="Inter", color='#888'), height=200, margin=dict(t=10,b=10), yaxis=dict(title="Beta", showgrid=True, gridcolor='rgba(255,255,255,0.05)'), xaxis=dict(showgrid=False), showlegend=False)
+            st.plotly_chart(fig_lev, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # 8. CHART TERTIAIRE (Underwater)
+        st.markdown("### 🌊 Underwater Plot")
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         dd_series = (df_res['portfolio'] / df_res['portfolio'].cummax() - 1) * 100
         fig_dd = go.Figure()
-        fig_dd.add_trace(go.Scatter(
-            x=dd_series.index, y=dd_series,
-            fill='tozeroy', line=dict(color='#ef4444', width=1),
-            fillcolor='rgba(239, 68, 68, 0.2)'
-        ))
-        fig_dd.update_layout(
-            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(family="Inter", color='#888'), height=200, margin=dict(t=0,b=0,l=0,r=0),
-            yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)')
-        )
+        fig_dd.add_trace(go.Scatter(x=dd_series.index, y=dd_series, fill='tozeroy', line=dict(color='#ef4444', width=1), fillcolor='rgba(239, 68, 68, 0.2)'))
+        fig_dd.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(family="Inter", color='#888'), height=200, margin=dict(t=0,b=0,l=0,r=0), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)'))
         st.plotly_chart(fig_dd, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-# --- VALIDATION (SEULEMENT SI DONNÉES OK) ---
+# --- VALIDATION COLUMN ---
 with col_valid:
-    if not data.empty and len(data) >= 10:
+    if not data.empty:
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.markdown("### 🛡️ ROBUSTESSE")
-        
         if st.button("LANCER VALIDATION"):
-            with st.spinner("Calculs Monte-Carlo & Walk-Forward..."):
+            with st.spinner("Calculs..."):
                 wf_res = run_walk_forward(data, params)
+                mc_res = run_monte_carlo(data, params)
                 avg_overfit = np.mean([w['overfit'] for w in wf_res]) if wf_res else 0
-                
-                mc_res = run_monte_carlo(data, params, runs=100)
                 prob_loss = len(mc_res[mc_res['CAGR'] < 0]) / len(mc_res) * 100
                 
                 verdict = "ROBUSTE" if avg_overfit < 1.5 and prob_loss < 20 else "FRAGILE"
-                color_v = "#10b981" if verdict == "ROBUSTE" else "#ef4444"
+                col_v = "#10b981" if verdict == "ROBUSTE" else "#ef4444"
                 
-                st.markdown(f"""
-                <div style="background:{color_v}20; border:1px solid {color_v}; padding:15px; border-radius:10px; text-align:center; margin-bottom:15px;">
-                    <h2 style="color:{color_v}; margin:0;">{verdict}</h2>
-                    <p style="font-size:11px; margin:5px 0 0 0; color:#aaa;">Overfit: {avg_overfit:.2f}x • Prob. Perte: {prob_loss:.0f}%</p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f"<div style='background:{col_v}20; border:1px solid {col_v}; padding:15px; border-radius:10px; text-align:center;'><h2 style='color:{col_v}; margin:0;'>{verdict}</h2><p style='font-size:11px; margin:5px 0 0 0; color:#aaa;'>Overfit: {avg_overfit:.2f}x • Prob. Perte: {prob_loss:.0f}%</p></div>", unsafe_allow_html=True)
                 
-                st.markdown("#### Walk-Forward Periods")
+                st.markdown("#### Walk-Forward")
                 for w in wf_res:
-                    col_o = "#ef4444" if w['overfit'] > 1.5 else "#10b981"
-                    st.markdown(f"""
-                    <div style="background:rgba(255,255,255,0.05); padding:8px; border-radius:6px; margin-bottom:5px; font-size:11px; display:flex; justify-content:space-between;">
-                        <span>{w['period']}</span>
-                        <span>Train: {w['train_cagr']:.0f}% | Test: {w['test_cagr']:.0f}%</span>
-                        <span style="color:{col_o}">{w['overfit']:.1f}x</span>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    c_o = "#ef4444" if w['overfit'] > 1.5 else "#10b981"
+                    st.markdown(f"<div style='background:rgba(255,255,255,0.05); padding:8px; border-radius:6px; margin-bottom:5px; font-size:11px; display:flex; justify-content:space-between;'><span>{w['period']}</span><span>Tr:{w['train_cagr']:.0f}% Te:{w['test_cagr']:.0f}%</span><span style='color:{c_o}'>{w['overfit']:.1f}x</span></div>", unsafe_allow_html=True)
                     
-                st.markdown("#### Distribution Monte-Carlo")
+                st.markdown("#### Monte-Carlo Dist.")
                 fig_mc = px.histogram(mc_res, x="CAGR", nbins=20, color_discrete_sequence=['#667eea'])
-                fig_mc.update_layout(
-                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                    font=dict(color='#888', size=10), height=150, margin=dict(l=0,r=0,t=0,b=0),
-                    xaxis_title=None, yaxis_title=None, showlegend=False
-                )
+                fig_mc.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#888', size=10), height=150, margin=dict(l=0,r=0,t=0,b=0), xaxis_title=None, yaxis_title=None, showlegend=False)
                 st.plotly_chart(fig_mc, use_container_width=True)
-        else:
-            st.info("Cliquez pour lancer l'analyse de robustesse complète.")
-            
         st.markdown('</div>', unsafe_allow_html=True)
