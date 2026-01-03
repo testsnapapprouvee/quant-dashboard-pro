@@ -331,18 +331,19 @@ def run_monte_carlo(data, params, runs=100):
     return pd.DataFrame(results)
 
 # ==========================================
-# 4. DATA ENGINE (VERSION BULLDOZER CORRIGÉE)
+# 4. DATA ENGINE (VERSION BULLDOZER FIX)
 # ==========================================
 @st.cache_data(ttl=3600)
 def get_data(tickers, start, end):
     """
     Récupère les données de manière agressive.
     Si le téléchargement groupé échoue, on passe ticker par ticker.
+    UTILISE PD.CONCAT pour éviter l'erreur de scalaires.
     """
     if not tickers: return pd.DataFrame()
     
-    price_map = {}
     clean_tickers = [t.strip().upper() for t in tickers]
+    series_list = [] # On stocke les séries ici
     
     # TELECHARGEMENT INDIVIDUEL (ROBUSTE)
     for t in clean_tickers:
@@ -354,19 +355,28 @@ def get_data(tickers, start, end):
                 df_temp = yf.download(t, start=start, end=end, progress=False, auto_adjust=False)
             
             if not df_temp.empty:
+                # Extraction propre de la Série
                 if 'Close' in df_temp.columns:
-                    price_map[t] = df_temp['Close']
+                    s = df_temp['Close']
                 elif 'Adj Close' in df_temp.columns:
-                    price_map[t] = df_temp['Adj Close']
+                    s = df_temp['Adj Close']
+                else:
+                    # Cas rare où yfinance ne renvoie pas de colonnes standard
+                    s = df_temp.iloc[:, 0]
+                
+                # On renomme la série avec le ticker pour le concat
+                s.name = t
+                series_list.append(s)
                     
         except Exception as e:
             continue
 
-    if len(price_map) >= 2:
-        # On suppose que l'ordre d'entrée est respecté : X2 (Risk) puis X1 (Safe)
-        df_final = pd.DataFrame(price_map)
+    if len(series_list) >= 2:
+        # Assemblage robuste via concat (gère les index automatiquement)
+        df_final = pd.concat(series_list, axis=1)
         
         # On renomme pour le moteur interne : Colonne 1 -> X2, Colonne 2 -> X1
+        # On suppose que l'utilisateur a mis [RISK, SAFE] dans l'ordre
         cols = df_final.columns
         df_final.rename(columns={cols[0]: 'X2', cols[1]: 'X1'}, inplace=True)
         
@@ -440,14 +450,15 @@ if 'opt_params' in st.session_state:
 with col_main:
     if data.empty or len(data) < 10:
         st.error(f"""
-        ❌ **DONNÉES NON DISPONIBLES**
+        ❌ **AUCUNE DONNÉE DISPONIBLE**
         
-        Impossible de récupérer : **{', '.join(tickers)}**.
+        Impossible de charger les données pour : **{', '.join(tickers)}**.
         
-        **Conseils :**
-        1. Vérifiez que les tickers existent sur [Yahoo Finance](https://finance.yahoo.com).
-        2. Pour Paris, ajoutez **.PA** (ex: `LQQ.PA`). Pour les USA, rien (ex: `QLD`).
-        3. Vérifiez que la date de début n'est pas fériée.
+        **Vérifications :**
+        1. Les tickers existent sur Yahoo Finance ? (ex: `LQQ.PA` pour Lyxor Nasdaq 2x)
+        2. La période demandée contient-elle des jours de bourse ?
+        
+        *Essayez de changer les tickers ou la date.*
         """)
     else:
         # 1. Backtest
