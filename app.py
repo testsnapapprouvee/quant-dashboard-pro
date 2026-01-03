@@ -111,8 +111,15 @@ class BacktestEngine:
         for i in range(len(data)):
             # 1. Mise à jour Portfolio
             if i > 0:
-                r_x2 = (prices_x2[i] - prices_x2[i-1]) / prices_x2[i-1]
-                r_x1 = (prices_x1[i] - prices_x1[i-1]) / prices_x1[i-1]
+                # Protection division par zéro
+                if prices_x2[i-1] != 0:
+                    r_x2 = (prices_x2[i] - prices_x2[i-1]) / prices_x2[i-1]
+                else: r_x2 = 0
+                
+                if prices_x1[i-1] != 0:
+                    r_x1 = (prices_x1[i] - prices_x1[i-1]) / prices_x1[i-1]
+                else: r_x1 = 0
+
                 cash_x2 *= (1 + r_x2)
                 cash_x1 *= (1 + r_x1)
                 portfolio = cash_x2 + cash_x1
@@ -124,7 +131,7 @@ class BacktestEngine:
                 price_history_x2.pop(0)
             
             rolling_peak = max(price_history_x2)
-            if rolling_peak == 0: rolling_peak = 1 # Eviter div/0
+            if rolling_peak == 0: rolling_peak = 1
             current_dd = ((curr_price - rolling_peak) / rolling_peak) * 100
             
             # 3. Logique de Régime
@@ -289,53 +296,56 @@ def run_monte_carlo(data, params, runs=100):
     return pd.DataFrame(results)
 
 # ==========================================
-# 4. DATA ENGINE & FALLBACK (C'EST LA QUE CA SE JOUE)
+# 4. DATA ENGINE (STRICTEMENT YAHOO)
 # ==========================================
-def generate_mock_data(start_date, end_date):
-    """Génère des données mathématiques si Yahoo échoue"""
-    dates = pd.date_range(start=start_date, end=end_date, freq='B')
-    n = len(dates)
-    
-    # Simulation X2 (Volatile + Trend)
-    returns_x2 = np.random.normal(0.0005, 0.02, n)
-    price_x2 = 100 * np.cumprod(1 + returns_x2)
-    
-    # Simulation X1 (Stable)
-    returns_x1 = np.random.normal(0.0002, 0.005, n)
-    price_x1 = 100 * np.cumprod(1 + returns_x1)
-    
-    df = pd.DataFrame({'X2': price_x2, 'X1': price_x1}, index=dates)
-    return df
-
 @st.cache_data(ttl=3600)
 def get_data(tickers, start, end):
+    """
+    Récupère STRICTEMENT les données Yahoo.
+    Si ça échoue, renvoie vide et l'interface affichera une erreur.
+    Pas de données générées.
+    """
+    if not tickers:
+        return pd.DataFrame()
+
+    # Utilisation de group_by='ticker' pour stabiliser le format multi-colonnes
     try:
         df = yf.download(tickers, start=start, end=end, progress=False, group_by='ticker', auto_adjust=True)
-        prices = pd.DataFrame()
+    except Exception as e:
+        return pd.DataFrame()
+
+    prices = pd.DataFrame()
+
+    # Logique d'extraction Robuste
+    if len(tickers) >= 2:
+        t_x2 = tickers[0]
+        t_x1 = tickers[1]
         
-        # Tentative d'extraction Yahoo
-        if len(tickers) >= 2:
-            t_x2 = tickers[0]
-            t_x1 = tickers[1]
-            # Gestion multi-index capricieuse de Yahoo
+        # 1. Cas Multi-Index (Le plus courant avec 2+ tickers)
+        if isinstance(df.columns, pd.MultiIndex):
             try:
-                if isinstance(df.columns, pd.MultiIndex):
+                # On vérifie si les tickers sont bien dans les colonnes (Attention à la casse)
+                cols = df.columns.levels[0]
+                if t_x2 in cols and t_x1 in cols:
                     prices['X2'] = df[t_x2]['Close']
                     prices['X1'] = df[t_x1]['Close']
-                else:
-                    # Si Yahoo renvoie un format plat bizarre
-                    prices['X2'] = df.iloc[:, 0]
-                    prices['X1'] = df.iloc[:, 1]
             except:
-                return pd.DataFrame() # Echec extraction
+                pass
         
-        prices = prices.ffill().dropna()
-        if prices.empty or len(prices) < 10:
-            return pd.DataFrame() # Trop peu de données
-        return prices
-        
-    except Exception as e:
-        return pd.DataFrame() # Echec total
+        # 2. Cas Flat (Parfois Yahoo aplatit tout si un ticker échoue)
+        elif len(df.columns) >= 2:
+            # On prend les 2 premières colonnes en supposant que ce sont les Clôtures
+            # C'est risqué mais c'est un fallback si Yahoo change son API
+            try:
+                prices['X2'] = df.iloc[:, 0]
+                prices['X1'] = df.iloc[:, 1]
+            except:
+                pass
+    
+    # Nettoyage final
+    prices = prices.ffill().dropna()
+    
+    return prices
 
 # ==========================================
 # 5. UI LAYOUT
@@ -347,7 +357,7 @@ st.markdown("""
     <div style="display:flex; justify-content:space-between; align-items:center;">
         <div>
             <h1 style="margin:0;" class="title-gradient">Predict. DISTINCT PROFILES</h1>
-            <p style="color:#888; margin:5px 0 0 0; font-size:12px;">ENGINE V2.0 • REACT PORT • SILENT LUXURY UI</p>
+            <p style="color:#888; margin:5px 0 0 0; font-size:12px;">ENGINE V2.0 • REAL MARKET DATA ONLY</p>
         </div>
         <div style="text-align:right;">
             <span style="background:rgba(16, 185, 129, 0.1); color:#10b981; padding:5px 10px; border-radius:4px; font-size:11px; border:1px solid rgba(16, 185, 129, 0.2);">LIVE CONNECTED</span>
@@ -390,14 +400,10 @@ with col_sidebar:
             
     st.markdown('</div>', unsafe_allow_html=True)
 
-# --- DATA FETCHING AVEC FALLBACK ---
+# --- DATA FETCHING (STRICT) ---
 data = get_data(tickers, start_d, end_d)
 
-# Si Yahoo échoue, on prévient et on génère des données
-if data.empty:
-    st.warning("⚠️ Données Yahoo indisponibles ou Tickers invalides. Mode Démonstration activé (Données générées).")
-    data = generate_mock_data(start_d, end_d)
-
+# Params par défaut ou optimisés
 params = {
     'thresh': thresh, 'panic': panic, 'recovery': recov,
     'allocPrudence': alloc_prud, 'allocCrash': alloc_crash,
@@ -408,128 +414,146 @@ if 'opt_params' in st.session_state:
     p = st.session_state['opt_params']
     st.sidebar.success(f"AI: Seuil {p['thresh']}% | Panic {p['panic']}% | Recov {p['recov']}%")
 
-# --- CHARTS ---
+
+# --- AFFICHAGE PRINCIPAL OU ERREUR ---
 with col_main:
-    # On a garanti que data n'est pas vide grâce au fallback
-    df_res, trades = BacktestEngine.run_simulation(data, params)
-    metrics = calculate_metrics(df_res['portfolio'])
-    bench_met = calculate_metrics(df_res['benchX2'])
+    if data.empty or len(data) < 10:
+        # SI PAS DE DONNÉES RÉELLES, ON ARRÊTE TOUT ICI
+        st.error(f"""
+        ❌ **AUCUNE DONNÉE RÉCUPÉRÉE**
+        
+        Impossible de charger les données pour : **{', '.join(tickers)}**.
+        
+        **Causes possibles :**
+        1. Les tickers sont incorrects (ex: pour Euronext, ajoutez `.PA`, `.AS`).
+        2. La période sélectionnée ne contient pas de données.
+        3. Yahoo Finance bloque temporairement les requêtes.
+        
+        *Veuillez corriger les tickers à gauche.*
+        """)
+        
+    else:
+        # SI DONNÉES OK, ON LANCE LE RESTE
+        df_res, trades = BacktestEngine.run_simulation(data, params)
+        metrics = calculate_metrics(df_res['portfolio'])
+        bench_met = calculate_metrics(df_res['benchX2'])
 
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("CAGR Strat", f"{metrics['CAGR']:.1f}%", delta=f"{metrics['CAGR']-bench_met['CAGR']:.1f}%")
-    k2.metric("Max Drawdown", f"{metrics['MaxDD']:.1f}%", delta=f"{metrics['MaxDD']-bench_met['MaxDD']:.1f}%", delta_color="inverse")
-    k3.metric("Volatilité", f"{metrics['Vol']:.1f}%")
-    k4.metric("Trades", len(trades))
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("CAGR Strat", f"{metrics['CAGR']:.1f}%", delta=f"{metrics['CAGR']-bench_met['CAGR']:.1f}%")
+        k2.metric("Max Drawdown", f"{metrics['MaxDD']:.1f}%", delta=f"{metrics['MaxDD']-bench_met['MaxDD']:.1f}%", delta_color="inverse")
+        k3.metric("Volatilité", f"{metrics['Vol']:.1f}%")
+        k4.metric("Trades", len(trades))
 
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    fig = go.Figure()
-    
-    # Strat
-    fig.add_trace(go.Scatter(
-        x=df_res.index, y=df_res['portfolio'], 
-        mode='lines', name='STRATÉGIE',
-        line=dict(color='#667eea', width=3),
-        fill='tozeroy', fillcolor='rgba(102, 126, 234, 0.2)'
-    ))
-    # Bench X2
-    fig.add_trace(go.Scatter(
-        x=df_res.index, y=df_res['benchX2'], 
-        mode='lines', name='LEVIER X2',
-        line=dict(color='#ef4444', width=1.5, dash='dot'),
-        opacity=0.8
-    ))
-    # Bench X1
-    fig.add_trace(go.Scatter(
-        x=df_res.index, y=df_res['benchX1'], 
-        mode='lines', name='BENCHMARK X1',
-        line=dict(color='#10b981', width=1.5, dash='dot'),
-        opacity=0.6
-    ))
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        fig = go.Figure()
+        
+        # Strat
+        fig.add_trace(go.Scatter(
+            x=df_res.index, y=df_res['portfolio'], 
+            mode='lines', name='STRATÉGIE',
+            line=dict(color='#667eea', width=3),
+            fill='tozeroy', fillcolor='rgba(102, 126, 234, 0.2)'
+        ))
+        # Bench X2
+        fig.add_trace(go.Scatter(
+            x=df_res.index, y=df_res['benchX2'], 
+            mode='lines', name=f'{tickers[0]} (RISK)',
+            line=dict(color='#ef4444', width=1.5, dash='dot'),
+            opacity=0.8
+        ))
+        # Bench X1
+        fig.add_trace(go.Scatter(
+            x=df_res.index, y=df_res['benchX1'], 
+            mode='lines', name=f'{tickers[1]} (SAFE)',
+            line=dict(color='#10b981', width=1.5, dash='dot'),
+            opacity=0.6
+        ))
 
-    # Trades
-    for t in trades:
-        col = '#ef4444' if 'CRASH' in t['label'] else ('#f59e0b' if 'PRUDENCE' in t['label'] else '#10b981')
-        fig.add_annotation(
-            x=t['date'], y=df_res.loc[t['date']]['portfolio'],
-            text="▼" if t['to'] != 'R0' else "▲",
-            showarrow=False, font=dict(color=col, size=14)
+        # Trades
+        for t in trades:
+            col = '#ef4444' if 'CRASH' in t['label'] else ('#f59e0b' if 'PRUDENCE' in t['label'] else '#10b981')
+            fig.add_annotation(
+                x=t['date'], y=df_res.loc[t['date']]['portfolio'],
+                text="▼" if t['to'] != 'R0' else "▲",
+                showarrow=False, font=dict(color=col, size=14)
+            )
+
+        fig.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)', 
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="Inter", color='#888'),
+            height=450,
+            margin=dict(l=0, r=0, t=20, b=0),
+            xaxis=dict(showgrid=False, linecolor='#333'),
+            yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)'),
+            hovermode="x unified",
+            legend=dict(orientation="h", y=1.05, x=0)
         )
+        st.plotly_chart(fig, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Underwater
+        st.markdown("### 🌊 UNDERWATER PLOT")
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        dd_series = (df_res['portfolio'] / df_res['portfolio'].cummax() - 1) * 100
+        fig_dd = go.Figure()
+        fig_dd.add_trace(go.Scatter(
+            x=dd_series.index, y=dd_series,
+            fill='tozeroy', line=dict(color='#ef4444', width=1),
+            fillcolor='rgba(239, 68, 68, 0.2)'
+        ))
+        fig_dd.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="Inter", color='#888'), height=200, margin=dict(t=0,b=0,l=0,r=0),
+            yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)')
+        )
+        st.plotly_chart(fig_dd, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)', 
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(family="Inter", color='#888'),
-        height=450,
-        margin=dict(l=0, r=0, t=20, b=0),
-        xaxis=dict(showgrid=False, linecolor='#333'),
-        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)'),
-        hovermode="x unified",
-        legend=dict(orientation="h", y=1.05, x=0)
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Underwater
-    st.markdown("### 🌊 UNDERWATER PLOT")
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    dd_series = (df_res['portfolio'] / df_res['portfolio'].cummax() - 1) * 100
-    fig_dd = go.Figure()
-    fig_dd.add_trace(go.Scatter(
-        x=dd_series.index, y=dd_series,
-        fill='tozeroy', line=dict(color='#ef4444', width=1),
-        fillcolor='rgba(239, 68, 68, 0.2)'
-    ))
-    fig_dd.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(family="Inter", color='#888'), height=200, margin=dict(t=0,b=0,l=0,r=0),
-        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)')
-    )
-    st.plotly_chart(fig_dd, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# --- VALIDATION ---
+# --- VALIDATION (SEULEMENT SI DONNÉES OK) ---
 with col_valid:
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.markdown("### 🛡️ ROBUSTESSE")
-    
-    if st.button("LANCER VALIDATION"):
-        with st.spinner("Calculs Monte-Carlo & Walk-Forward..."):
-            wf_res = run_walk_forward(data, params)
-            avg_overfit = np.mean([w['overfit'] for w in wf_res]) if wf_res else 0
-            
-            mc_res = run_monte_carlo(data, params, runs=100)
-            prob_loss = len(mc_res[mc_res['CAGR'] < 0]) / len(mc_res) * 100
-            
-            verdict = "ROBUSTE" if avg_overfit < 1.5 and prob_loss < 20 else "FRAGILE"
-            color_v = "#10b981" if verdict == "ROBUSTE" else "#ef4444"
-            
-            st.markdown(f"""
-            <div style="background:{color_v}20; border:1px solid {color_v}; padding:15px; border-radius:10px; text-align:center; margin-bottom:15px;">
-                <h2 style="color:{color_v}; margin:0;">{verdict}</h2>
-                <p style="font-size:11px; margin:5px 0 0 0; color:#aaa;">Overfit: {avg_overfit:.2f}x • Prob. Perte: {prob_loss:.0f}%</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown("#### Walk-Forward Periods")
-            for w in wf_res:
-                col_o = "#ef4444" if w['overfit'] > 1.5 else "#10b981"
+    if not data.empty and len(data) >= 10:
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        st.markdown("### 🛡️ ROBUSTESSE")
+        
+        if st.button("LANCER VALIDATION"):
+            with st.spinner("Calculs Monte-Carlo & Walk-Forward..."):
+                wf_res = run_walk_forward(data, params)
+                avg_overfit = np.mean([w['overfit'] for w in wf_res]) if wf_res else 0
+                
+                mc_res = run_monte_carlo(data, params, runs=100)
+                prob_loss = len(mc_res[mc_res['CAGR'] < 0]) / len(mc_res) * 100
+                
+                verdict = "ROBUSTE" if avg_overfit < 1.5 and prob_loss < 20 else "FRAGILE"
+                color_v = "#10b981" if verdict == "ROBUSTE" else "#ef4444"
+                
                 st.markdown(f"""
-                <div style="background:rgba(255,255,255,0.05); padding:8px; border-radius:6px; margin-bottom:5px; font-size:11px; display:flex; justify-content:space-between;">
-                    <span>{w['period']}</span>
-                    <span>Train: {w['train_cagr']:.0f}% | Test: {w['test_cagr']:.0f}%</span>
-                    <span style="color:{col_o}">{w['overfit']:.1f}x</span>
+                <div style="background:{color_v}20; border:1px solid {color_v}; padding:15px; border-radius:10px; text-align:center; margin-bottom:15px;">
+                    <h2 style="color:{color_v}; margin:0;">{verdict}</h2>
+                    <p style="font-size:11px; margin:5px 0 0 0; color:#aaa;">Overfit: {avg_overfit:.2f}x • Prob. Perte: {prob_loss:.0f}%</p>
                 </div>
                 """, unsafe_allow_html=True)
                 
-            st.markdown("#### Distribution Monte-Carlo")
-            fig_mc = px.histogram(mc_res, x="CAGR", nbins=20, color_discrete_sequence=['#667eea'])
-            fig_mc.update_layout(
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='#888', size=10), height=150, margin=dict(l=0,r=0,t=0,b=0),
-                xaxis_title=None, yaxis_title=None, showlegend=False
-            )
-            st.plotly_chart(fig_mc, use_container_width=True)
-    else:
-        st.info("Cliquez pour lancer l'analyse de robustesse complète.")
-        
-    st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown("#### Walk-Forward Periods")
+                for w in wf_res:
+                    col_o = "#ef4444" if w['overfit'] > 1.5 else "#10b981"
+                    st.markdown(f"""
+                    <div style="background:rgba(255,255,255,0.05); padding:8px; border-radius:6px; margin-bottom:5px; font-size:11px; display:flex; justify-content:space-between;">
+                        <span>{w['period']}</span>
+                        <span>Train: {w['train_cagr']:.0f}% | Test: {w['test_cagr']:.0f}%</span>
+                        <span style="color:{col_o}">{w['overfit']:.1f}x</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                st.markdown("#### Distribution Monte-Carlo")
+                fig_mc = px.histogram(mc_res, x="CAGR", nbins=20, color_discrete_sequence=['#667eea'])
+                fig_mc.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#888', size=10), height=150, margin=dict(l=0,r=0,t=0,b=0),
+                    xaxis_title=None, yaxis_title=None, showlegend=False
+                )
+                st.plotly_chart(fig_mc, use_container_width=True)
+        else:
+            st.info("Cliquez pour lancer l'analyse de robustesse complète.")
+            
+        st.markdown('</div>', unsafe_allow_html=True)
