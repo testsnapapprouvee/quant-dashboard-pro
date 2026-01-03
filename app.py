@@ -8,73 +8,139 @@ from scipy.optimize import minimize
 from datetime import datetime, timedelta
 from quant_engine import RiskMetrics, VectorBacktester
 
-# --- CONFIGURATION PAGE & DESIGN "PREDICT" ---
-st.set_page_config(page_title="Predict.", layout="wide", page_icon="▪️")
+# --- 1. CONFIGURATION "BLACKROCK" ---
+st.set_page_config(page_title="Predict. | Aladdin", layout="wide", page_icon="▪️")
 
-# TON CSS ORIGINAL (INTOUCHÉ) + AJUSTEMENTS TABS
+# --- 2. CSS "INSTITUTIONAL" (CORRIGÉ: Police Helvetica/Arial) ---
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+    /* Pas d'import Google Fonts. On utilise la police système Finance (Froid/Sec) */
     
-    .stApp { background-color: #0E1117; font-family: 'Inter', sans-serif; }
-    h1, h2, h3, p, div, span { color: #E0E0E0; }
+    html, body, [class*="css"] {
+        font-family: 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif !important;
+    }
+
+    /* FOND GRIS FONCÉ (Pas noir pur) */
+    .stApp { background-color: #111111; }
     
-    /* TITRE */
-    .title-text { font-size: 3rem; font-weight: 600; color: #FFFFFF; letter-spacing: -0.05em; margin-bottom: 0px; }
-    .accent-dot { color: #8B5CF6; font-size: 3rem; }
-    .subtitle { font-size: 0.9rem; color: #888888; font-weight: 400; letter-spacing: 0.1em; text-transform: uppercase; margin-top: -10px; margin-bottom: 30px; }
+    /* TEXTES */
+    h1, h2, h3, p, div, span, label { color: #E6E6E6 !important; }
+    
+    /* TITRE LOGO */
+    .title-text { 
+        font-family: 'Arial', sans-serif; /* Très carré */
+        font-size: 2.8rem; 
+        font-weight: 700; 
+        color: #FFFFFF !important; 
+        letter-spacing: -1px; 
+    }
+    .accent-dot { color: #00FFAA; font-size: 2.8rem; } /* Vert Terminal Bloomberg */
+    .subtitle { 
+        font-size: 0.85rem; 
+        color: #999999 !important; 
+        font-weight: 400; 
+        letter-spacing: 1px; 
+        text-transform: uppercase; 
+        margin-top: -5px; 
+        margin-bottom: 25px; 
+        border-bottom: 1px solid #333;
+        padding-bottom: 15px;
+    }
 
     /* SIDEBAR */
-    section[data-testid="stSidebar"] { background-color: #161B22; border-right: 1px solid #30363D; }
+    section[data-testid="stSidebar"] { 
+        background-color: #000000; /* Sidebar Noir pur */
+        border-right: 1px solid #333333; 
+    }
     
-    /* INPUTS */
-    .stTextInput > div > div > input { background-color: #0D1117; color: #FFFFFF; border: 1px solid #30363D; border-radius: 6px; }
-    .stTextInput > div > div > input:focus { border-color: #8B5CF6; }
-    .stDateInput > div > div > input { background-color: #0D1117; color: white; }
+    /* INPUTS (Look Terminal) */
+    .stTextInput > div > div > input { 
+        background-color: #1A1A1A; 
+        color: #E6E6E6; 
+        border: 1px solid #333; 
+        border-radius: 0px; /* Bords carrés pro */
+        font-family: 'Courier New', monospace; /* Police code pour les inputs */
+    }
+    .stTextInput > div > div > input:focus { border-color: #00FFAA; }
     
+    /* DATE PICKER */
+    .stDateInput > div > div > input { 
+        background-color: #1A1A1A; 
+        color: white; 
+        border-radius: 0px; 
+    }
+    
+    /* BUTTONS */
+    div.stButton > button {
+        background-color: #333;
+        color: white;
+        border-radius: 0px;
+        border: none;
+    }
+
     /* SLIDERS */
-    div.stSlider > div[data-baseweb="slider"] > div > div { background-color: #8B5CF6 !important; } 
-    div.stSlider > div[data-baseweb="slider"] > div > div > div { background-color: #30363D !important; }
+    div.stSlider > div[data-baseweb="slider"] > div > div { background-color: #00FFAA !important; } 
+    div.stSlider > div[data-baseweb="slider"] > div > div > div { background-color: #FFFFFF !important; }
 
-    /* METRICS CARDS */
-    div[data-testid="stMetric"] { background-color: #161B22; border: 1px solid #30363D; border-radius: 8px; padding: 15px; }
-    div[data-testid="stMetricLabel"] { color: #8B949E; font-size: 0.8rem; }
-    div[data-testid="stMetricValue"] { color: #FFFFFF; font-size: 1.8rem; font-weight: 600; }
+    /* METRICS CARDS (Carrées et sobres) */
+    div[data-testid="stMetric"] { 
+        background-color: #1A1A1A; 
+        border: 1px solid #333; 
+        border-radius: 0px; /* Pas d'arrondi */
+        padding: 15px; 
+    }
+    div[data-testid="stMetricLabel"] { color: #888; font-size: 0.75rem; font-weight: 600; letter-spacing: 1px;}
+    div[data-testid="stMetricValue"] { color: #FFF; font-size: 1.6rem; font-weight: 700; font-family: 'Arial', sans-serif;}
 
-    /* CLEAN PLOTLY */
+    /* TABS (Style Bloomberg) */
+    .stTabs [data-baseweb="tab-list"] { gap: 0px; border-bottom: 1px solid #333; }
+    .stTabs [data-baseweb="tab"] { 
+        background-color: transparent; 
+        border: none; 
+        color: #666; 
+        font-weight: 600; 
+        border-radius: 0px;
+        padding-right: 20px;
+        padding-left: 20px;
+    }
+    .stTabs [aria-selected="true"] { 
+        color: #00FFAA; 
+        border-bottom: 2px solid #00FFAA; 
+    }
+
+    /* NETTOYAGE */
     .js-plotly-plot .plotly .modebar { display: none !important; }
     header, footer {visibility: hidden;}
-    
-    /* TABS STYLING (Pour que ça ne soit pas flou) */
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; border-bottom: 1px solid #30363D; }
-    .stTabs [data-baseweb="tab"] { background-color: transparent; border: none; color: #8B949E; font-weight: 400; }
-    .stTabs [aria-selected="true"] { color: #8B5CF6; border-bottom: 2px solid #8B5CF6; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- FONCTIONS ---
+# --- FONCTIONS DATA ---
 @st.cache_data(ttl=3600)
 def get_data(tickers, start, end):
     try:
         if not tickers: return pd.DataFrame()
+        # Téléchargement
         df = yf.download(tickers, start=start, end=end, progress=False, group_by='ticker', auto_adjust=True)
         prices = pd.DataFrame()
+        
+        # Logique d'extraction (Single vs Multi ticker)
         if len(tickers) == 1:
             t = tickers[0]
-            # Gestion cas unique/multi-index yfinance
-            if isinstance(df.columns, pd.MultiIndex): prices[t] = df['Close']
-            elif 'Close' in df.columns: prices[t] = df['Close']
+            # Vérif si MultiIndex ou pas (Yahoo change souvent)
+            if isinstance(df.columns, pd.MultiIndex): 
+                prices[t] = df['Close']
+            elif 'Close' in df.columns: 
+                prices[t] = df['Close']
         else:
             for t in tickers:
-                # Gestion robuste des colonnes
                 if t in df.columns:
                     try: prices[t] = df[t]['Close']
                     except: pass
                 elif isinstance(df.columns, pd.MultiIndex) and t in df.columns.levels[0]:
                      prices[t] = df[t]['Close']
+        
         return prices.fillna(method='ffill').dropna()
     except Exception as e:
-        print(e)
         return pd.DataFrame()
 
 def optimize(returns):
@@ -91,27 +157,27 @@ def optimize(returns):
 # --- HEADER ---
 st.markdown("""
 <div style="margin-top: -20px;">
-    <span class="title-text">Predict</span><span class="accent-dot">.</span>
-    <div class="subtitle">Institutional Asset Allocation</div>
+    <span class="title-text">BLK</span><span class="accent-dot">.</span><span class="title-text">ALADDIN</span>
+    <div class="subtitle">Institutional Risk & Allocation System</div>
 </div>
 """, unsafe_allow_html=True)
 
-# --- SIDEBAR (Contrôles Globaux) ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.markdown("### CONFIGURATION")
-    tickers_input = st.text_input("Assets", "BTC-USD, ETH-USD, SPY, NVDA")
+    st.markdown("### DATA FEED")
+    tickers_input = st.text_input("Tickers (Yahoo)", "BTC-USD, SPY, NVDA, TLT")
     tickers = [t.strip().upper() for t in tickers_input.split(',') if t.strip() != ""]
     
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("### CALENDRIER")
-    # LE VOILA LE CALENDRIER
+    st.markdown("### PERIOD")
+    # LE VRAI CALENDRIER
     date_range = st.date_input(
-        "Période d'analyse",
+        "Select Range",
         value=(datetime.now() - timedelta(days=365*2), datetime.now()),
         format="DD/MM/YYYY"
     )
 
-# --- LOGIQUE PRINCIPALE ---
+# --- CORE LOGIC ---
 if len(tickers) > 0 and isinstance(date_range, tuple) and len(date_range) == 2:
     start_d, end_d = date_range
     data = get_data(tickers, start_d, end_d)
@@ -119,92 +185,120 @@ if len(tickers) > 0 and isinstance(date_range, tuple) and len(date_range) == 2:
     if not data.empty:
         returns = data.pct_change().dropna()
         
-        # ONGLETS PROPRES
-        tab1, tab2, tab3 = st.tabs(["ALLOCATION", "CORRELATIONS", "BACKTEST"])
+        # --- TABS NAVIGATION ---
+        tab1, tab2, tab3 = st.tabs(["ALLOCATION", "CORRELATION", "BACKTEST"])
         
-        # === TAB 1: ALLOCATION (Ton code original) ===
+        # === 1. PORTFOLIO ALLOCATION ===
         with tab1:
             st.markdown("<br>", unsafe_allow_html=True)
-            col_opt, col_void = st.columns([1, 2])
-            with col_opt:
-                mode = st.radio("Optimization", ["Fixed Weight", "Max Sharpe (AI)"])
+            c1, c2 = st.columns([1, 3])
+            with c1:
+                mode = st.radio("Mode", ["Equal Weight", "Max Sharpe"], label_visibility="collapsed")
             
-            weights = []
-            if mode == "Max Sharpe (AI)" and len(data.columns) >= 2:
+            # Calcul Poids
+            if mode == "Max Sharpe" and len(data.columns) >= 2:
                 weights = optimize(returns)
             else:
-                weights = [1/len(data.columns)] * len(data.columns) # Equi-weighted par défaut
+                weights = [1/len(data.columns)] * len(data.columns)
             
+            # Performance Portefeuille
             port_ret = returns.dot(weights)
             cum_port = (1 + port_ret).cumprod() * 100
             
-            # KPI
+            # Metrics
             total_ret = cum_port.iloc[-1]/100 - 1
             vol = port_ret.std() * np.sqrt(252)
-            sharpe = (total_ret) / vol if vol > 0 else 0 # Simplifié
+            sharpe = total_ret / vol if vol > 0 else 0
             
             k1, k2, k3 = st.columns(3)
             k1.metric("Total Return", f"{total_ret:.2%}")
             k2.metric("Sharpe Ratio", f"{sharpe:.2f}")
-            k3.metric("Volatilité", f"{vol:.2%}")
+            k3.metric("Annual Vol", f"{vol:.2%}")
             
-            # Graphique
+            # Graphique Ligne (Style Terminal)
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=cum_port.index, y=cum_port, name="PORTFOLIO", line=dict(color='#8B5CF6', width=2), fill='tozeroy', fillcolor='rgba(139, 92, 246, 0.1)'))
+            # Portefeuille (Blanc/Vert)
+            fig.add_trace(go.Scatter(
+                x=cum_port.index, y=cum_port, name="PORTFOLIO", 
+                line=dict(color='#00FFAA', width=2)
+            ))
+            # Benchmark Assets (Gris sombre)
             for col in data.columns:
                 asset_curve = (1 + returns[col]).cumprod() * 100
-                fig.add_trace(go.Scatter(x=asset_curve.index, y=asset_curve, name=col, line=dict(color='#484F58', width=1), opacity=0.5))
+                fig.add_trace(go.Scatter(
+                    x=asset_curve.index, y=asset_curve, name=col, 
+                    line=dict(color='#444', width=1), opacity=0.7
+                ))
             
-            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(family="Inter", color='#8B949E'), xaxis=dict(showgrid=False, linecolor='#30363D'), yaxis=dict(showgrid=True, gridcolor='#21262D'), height=450, margin=dict(l=0,r=0,t=20,b=0))
+            fig.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)', 
+                plot_bgcolor='rgba(0,0,0,0)', 
+                font=dict(family="Arial", color='#888'),
+                xaxis=dict(showgrid=False, linecolor='#333'), 
+                yaxis=dict(showgrid=True, gridcolor='#222'), 
+                margin=dict(l=0,r=0,t=20,b=0),
+                height=450
+            )
             st.plotly_chart(fig, use_container_width=True)
 
-        # === TAB 2: CORRELATIONS (La feature manquante) ===
+        # === 2. MATRICE DE CORRELATION ===
         with tab2:
-            st.markdown("### Matrix")
+            st.markdown("<br>", unsafe_allow_html=True)
             corr = returns.corr()
             
-            # Heatmap Plotly Custom "Dark"
+            # Heatmap propre
             fig_corr = px.imshow(
                 corr, 
                 text_auto=".2f",
-                color_continuous_scale=[[0, '#0E1117'], [1, '#8B5CF6']], # Du noir au violet
+                color_continuous_scale=[[0, 'black'], [1, '#00FFAA']], # Noir vers Vert Terminal
                 aspect="auto"
             )
             fig_corr.update_layout(
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(family="Inter", color='#E0E0E0'),
+                font=dict(family="Arial", color='#EEE'),
                 height=500
             )
             st.plotly_chart(fig_corr, use_container_width=True)
 
-        # === TAB 3: QUANT BACKTEST (Le moteur rajouté) ===
+        # === 3. BACKTEST QUANT (ENGINE) ===
         with tab3:
+            st.markdown("<br>", unsafe_allow_html=True)
             col_b1, col_b2, col_b3 = st.columns(3)
-            asset_bt = col_b1.selectbox("Asset to Test", tickers)
-            sma_s = col_b2.number_input("Short MA", 10, 100, 20)
-            sma_l = col_b3.number_input("Long MA", 50, 365, 50)
+            asset_bt = col_b1.selectbox("Asset", tickers)
+            sma_s = col_b2.number_input("Short MA", 5, 50, 20)
+            sma_l = col_b3.number_input("Long MA", 50, 200, 50)
             
             if asset_bt:
+                # Appel Moteur
                 bt = VectorBacktester(data[asset_bt])
                 res = bt.run_strategy(sma_s, sma_l)
                 met = RiskMetrics.get_metrics(res['Strat_Ret'])
                 
-                # Metrics Backtest
+                # KPIs Backtest
                 b1, b2, b3, b4 = st.columns(4)
-                b1.metric("Strategy Return", f"{(res['Curve'].iloc[-1]/100 - 1):.2%}")
+                b1.metric("Strategy Ret", f"{(res['Curve'].iloc[-1]/100 - 1):.2%}")
                 b2.metric("Max Drawdown", f"{met['MaxDD']:.2%}")
                 b3.metric("Sharpe", f"{met['Sharpe']:.2f}")
                 b4.metric("VaR 95%", f"{met['VaR']:.2%}")
                 
-                # Graphique Backtest
+                # Chart Backtest
                 fig_bt = go.Figure()
-                fig_bt.add_trace(go.Scatter(x=res.index, y=res['Curve'], name="STRATEGY", line=dict(color='#8B5CF6', width=2)))
-                fig_bt.add_trace(go.Scatter(x=res.index, y=res['BH_Curve'], name="BUY & HOLD", line=dict(color='#484F58', width=1, dash='dot')))
-                fig_bt.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(family="Inter", color='#8B949E'), xaxis=dict(showgrid=False, linecolor='#30363D'), yaxis=dict(showgrid=True, gridcolor='#21262D'), height=400, margin=dict(l=0,r=0,t=20,b=0))
+                fig_bt.add_trace(go.Scatter(x=res.index, y=res['Curve'], name="STRATEGY", line=dict(color='#00FFAA', width=2)))
+                fig_bt.add_trace(go.Scatter(x=res.index, y=res['BH_Curve'], name="BUY & HOLD", line=dict(color='#666', width=1, dash='dot')))
+                
+                fig_bt.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)', 
+                    plot_bgcolor='rgba(0,0,0,0)', 
+                    font=dict(family="Arial", color='#888'),
+                    xaxis=dict(showgrid=False, linecolor='#333'), 
+                    yaxis=dict(showgrid=True, gridcolor='#222'),
+                    margin=dict(l=0,r=0,t=20,b=0),
+                    height=450
+                )
                 st.plotly_chart(fig_bt, use_container_width=True)
 
     else:
-        st.warning("No data found for these tickers/dates.")
+        st.warning("⚠️ Waiting for data stream...")
 else:
-    st.info("Please select a date range.")
+    st.info("System Ready. Select date range.")
