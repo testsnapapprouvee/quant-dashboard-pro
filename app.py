@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 # ==========================================
 # 0. CONFIGURATION & IMPORTS
 # ==========================================
-st.set_page_config(page_title="Predict. Distinct | Institutional", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="Predict.", layout="wide", page_icon="⚡")
 
 # --- MODULE IMPORT WITH FALLBACK ---
 MODULES_STATUS = {"Risk": False, "Leverage": False, "Arbitrage": False}
@@ -49,26 +49,25 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     
-    .stApp { background-color: #0a0a0f; font-family: 'Inter', sans-serif; color: #E0E0E0; }
+    .stApp { background-color: #0A0A0F; font-family: 'Inter', sans-serif; color: #E0E0E0; }
     h1, h2, h3, h4, p, div, span, label { color: #E0E0E0; }
     
     /* HEADER */
     .header-container {
-        background: linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%);
+        background: linear-gradient(135deg, #1E1E2E 0%, #2A2A3E 100%);
         border-radius: 12px; padding: 25px; 
         border: 1px solid rgba(255,255,255,0.08); 
         margin-bottom: 20px;
         box-shadow: 0 4px 20px rgba(0,0,0,0.4);
     }
-    .title-gradient {
-        background: linear-gradient(135deg, #667eea 0%, #A855F7 100%);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        font-weight: 800; font-size: 32px; letter-spacing: -1px;
-    }
+    .title-text { font-weight: 800; font-size: 32px; letter-spacing: -1px; color: #FFFFFF; }
+    .title-dot { color: #A855F7; font-size: 32px; font-weight: 800; }
     
     /* METRICS TABLE */
     table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: 'Inter'; }
-    th { text-align: left; color: #aaa; background-color: #1e1e2e; padding: 10px; border-bottom: 1px solid #333; }
+    th { text-align: left; color: #aaa; background-color: #1E1E2E; padding: 10px; border-bottom: 1px solid #333; }
+    tr:nth-child(even) { background-color: #1E1E2E; }
+    tr:nth-child(odd) { background-color: #2A2A3E; }
     td { padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.05); color: #E0E0E0; }
     
     /* TABS */
@@ -76,7 +75,7 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] { background: transparent; color: #888; border: none; font-weight: 500; padding-bottom: 10px; }
     .stTabs [aria-selected="true"] { color: #A855F7 !important; border-bottom: 2px solid #A855F7 !important; font-weight: 600; }
     
-    /* CARDS */
+    /* SIDEBAR / CARDS */
     .glass-card { 
         background: rgba(30, 30, 46, 0.6); 
         border-radius: 12px; 
@@ -87,7 +86,7 @@ st.markdown("""
     }
     
     /* WIDGETS */
-    .stButton > button { width: 100%; border-radius: 6px; font-weight: 600; background-color: #1e1e2e; color: #A855F7; border: 1px solid #A855F7; }
+    .stButton > button { width: 100%; border-radius: 6px; font-weight: 600; background-color: #1E1E2E; color: #A855F7; border: 1px solid #A855F7; transition: all 0.3s; }
     .stButton > button:hover { background-color: #A855F7; color: white; border: 1px solid #A855F7; }
     
     /* REMOVE UTILS */
@@ -277,7 +276,7 @@ st.markdown("""
 <div class="header-container">
     <div style="display:flex; justify-content:space-between; align-items:center;">
         <div>
-            <h1 style="margin:0;" class="title-gradient">Predict. DISTINCT PROFILES</h1>
+            <span class="title-text">Predict</span><span class="title-dot">.</span>
             <p style="color:#888; margin:5px 0 0 0; font-size:12px;">ENGINE V2.0 • SILENT LUXURY THEME • INSTITUTIONAL</p>
         </div>
         <div style="text-align:right;">
@@ -308,8 +307,23 @@ with col_sidebar:
         tickers = presets[sel_preset]
         st.caption(f"Risk: **{tickers[0]}** | Safe: **{tickers[1]}**")
     
-    start_d = st.date_input("Start", datetime(2022, 1, 1))
-    end_d = st.date_input("End", datetime.now())
+    period_options = ["YTD", "1Y", "3YR", "5YR", "2022", "2008", "Custom"]
+    sel_period = st.selectbox("Period", period_options, index=3)
+    
+    today = datetime.now()
+    if sel_period == "YTD": start_d = datetime(today.year, 1, 1)
+    elif sel_period == "1Y": start_d = today - timedelta(days=365)
+    elif sel_period == "3YR": start_d = today - timedelta(days=365*3)
+    elif sel_period == "5YR": start_d = today - timedelta(days=365*5)
+    elif sel_period == "2022": start_d = datetime(2022,1,1); end_d = datetime(2022,12,31)
+    elif sel_period == "2008": start_d = datetime(2008,1,1); end_d = datetime(2008,12,31)
+    else: start_d = datetime(2022,1,1) # Custom default
+    
+    if sel_period == "Custom":
+        start_d = st.date_input("Start", datetime(2022, 1, 1))
+        end_d = st.date_input("End", datetime.now())
+    elif sel_period not in ["2022", "2008"]:
+        end_d = today
     
     st.markdown("---")
     st.markdown("### ⚡ PARAMS")
@@ -323,7 +337,7 @@ with col_sidebar:
     st.markdown("---")
     alloc_prud = st.slider("Prudence (X1%)", 0, 100, 50, 10)
     alloc_crash = st.slider("Crash (X1%)", 0, 100, 100, 10)
-    tx_cost = st.number_input("Tx Cost (%)", 0.0, 1.0, 0.10, 0.01) / 100
+    confirm = st.slider("Confirm (Days)", 1, 3, 2, 1)
     
     st.markdown("---")
     profile = st.selectbox("Objective", ["DEFENSIVE", "BALANCED", "AGGRESSIVE"])
@@ -332,7 +346,7 @@ with col_sidebar:
         opt_data = get_data(tickers, start_d, end_d)
         if not opt_data.empty:
             with st.spinner("Grid Searching..."):
-                base_p = {'allocPrudence': alloc_prud, 'allocCrash': alloc_crash, 'rollingWindow': 60, 'confirm': 2, 'cost': tx_cost}
+                base_p = {'allocPrudence': alloc_prud, 'allocCrash': alloc_crash, 'rollingWindow': 60, 'confirm': confirm, 'cost': 0.001}
                 best_p, _ = Optimizer.run_grid_search(opt_data, profile, base_p)
                 st.session_state['params'] = best_p
                 st.success("Optimized!")
@@ -349,7 +363,7 @@ with col_main:
         sim_params = {
             'thresh': thresh, 'panic': panic, 'recovery': recov,
             'allocPrudence': alloc_prud, 'allocCrash': alloc_crash,
-            'rollingWindow': 60, 'confirm': 2, 'cost': tx_cost
+            'rollingWindow': 60, 'confirm': confirm, 'cost': 0.001
         }
         
         df_res, trades = BacktestEngine.run_simulation(data, sim_params)
@@ -362,7 +376,7 @@ with col_main:
         arb_sig = ArbitrageSignals.calculate_relative_strength(data) if MODULES_STATUS["Arbitrage"] else pd.DataFrame()
 
         # TABS
-        tabs = st.tabs(["📊 Dashboard", "📈 Performance", "⚙️ Risk & Leverage", "🎯 Signals"])
+        tabs = st.tabs(["Performance", "Risk & Leverage", "Signals", "Validation", "Monte Carlo"])
         
         # --- TAB 1: DASHBOARD ---
         with tabs[0]:
@@ -381,19 +395,21 @@ with col_main:
             fig.add_trace(go.Scatter(x=df_res.index, y=df_res['benchX1'], name='Safe (X1)', 
                                      line=dict(color='#10b981', width=1.5, dash='dot')))
             
+            # Auto-zoom
+            min_val = min(df_res['portfolio'].min(), df_res['benchX2'].min(), df_res['benchX1'].min())
+            max_val = max(df_res['portfolio'].max(), df_res['benchX2'].max(), df_res['benchX1'].max())
+            
             for t in trades:
                 col = '#ef4444' if 'CRASH' in t['label'] else ('#f59e0b' if 'PRUDENCE' in t['label'] else '#10b981')
                 fig.add_annotation(x=t['date'], y=df_res.loc[t['date']]['portfolio'], text="▼" if t['to']!='R0' else "▲", 
                                    showarrow=False, font=dict(color=col, size=14))
                 
-            fig.update_layout(paper_bgcolor='#0a0a0f', plot_bgcolor='#0a0a0f', font=dict(family="Inter", color='#E0E0E0'), 
+            fig.update_layout(paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', font=dict(family="Inter", color='#E0E0E0'), 
                               height=450, margin=dict(l=40, r=40, t=20, b=40), xaxis=dict(showgrid=False, linecolor='#333'), 
-                              yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)'), hovermode="x unified", legend=dict(orientation="h", y=1.05))
+                              yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', range=[min_val*0.9, max_val*1.1]), hovermode="x unified", legend=dict(orientation="h", y=1.05))
             st.plotly_chart(fig, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # --- TAB 2: PERFORMANCE TABLE ---
-        with tabs[1]:
             st.markdown("### 🏆 Performance Attribution")
             p_data = {
                 "Metric": ["CAGR", "Vol (Ann)", "Sharpe", "MaxDD", "Calmar", "Cumul"],
@@ -401,23 +417,10 @@ with col_main:
                 "Risk (X2)": [f"{met_x2['CAGR']:.1f}%", f"{met_x2['Vol']:.1f}%", f"{met_x2['Sharpe']:.2f}", f"{met_x2['MaxDD']:.1f}%", f"{met_x2['Calmar']:.2f}", f"{met_x2['Cumul']:.1f}%"],
                 "Safe (X1)": [f"{met_x1['CAGR']:.1f}%", f"{met_x1['Vol']:.1f}%", f"{met_x1['Sharpe']:.2f}", f"{met_x1['MaxDD']:.1f}%", f"{met_x1['Calmar']:.2f}", f"{met_x1['Cumul']:.1f}%"]
             }
-            st.markdown(pd.DataFrame(p_data).style.hide(axis="index").set_properties(**{'background-color': '#0a0a0f', 'color': '#eee', 'border-color': '#333'}).to_html(), unsafe_allow_html=True)
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("### 🌊 Underwater Drawdown")
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            dd_s = (df_res['portfolio'] / df_res['portfolio'].cummax() - 1) * 100
-            dd_x2 = (df_res['benchX2'] / df_res['benchX2'].cummax() - 1) * 100
-            
-            fig_dd = go.Figure()
-            fig_dd.add_trace(go.Scatter(x=dd_s.index, y=dd_s, fill='tozeroy', name='Strategy', line=dict(color='#A855F7', width=1), fillcolor='rgba(168, 85, 247, 0.15)'))
-            fig_dd.add_trace(go.Scatter(x=dd_x2.index, y=dd_x2, name='Risk (X2)', line=dict(color='#ef4444', width=1, dash='dot')))
-            fig_dd.update_layout(paper_bgcolor='#0a0a0f', plot_bgcolor='#0a0a0f', font=dict(family="Inter", color='#E0E0E0'), height=250, margin=dict(t=10,b=10), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)'))
-            st.plotly_chart(fig_dd, use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown(pd.DataFrame(p_data).style.hide(axis="index").set_properties(**{'background-color': '#0A0A0F', 'color': '#eee', 'border-color': '#333'}).to_html(), unsafe_allow_html=True)
 
-        # --- TAB 3: RISK & LEVERAGE ---
-        with tabs[2]:
+        # --- TAB 2: RISK & LEVERAGE ---
+        with tabs[1]:
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("### ⚠️ Risk Profile")
@@ -432,11 +435,23 @@ with col_main:
                     fig_l = go.Figure()
                     fig_l.add_trace(go.Scatter(x=lev_beta.index, y=lev_beta['Realized_Beta'], line=dict(color='#A855F7')))
                     fig_l.add_hline(y=2.0, line_dash="dot", line_color="white")
-                    fig_l.update_layout(paper_bgcolor='#0a0a0f', plot_bgcolor='#0a0a0f', font=dict(family="Inter", color='#E0E0E0'), height=200, margin=dict(t=10,b=10))
+                    fig_l.update_layout(paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', font=dict(family="Inter", color='#E0E0E0'), height=200, margin=dict(t=10,b=10))
                     st.plotly_chart(fig_l, use_container_width=True)
+            
+            st.markdown("### 🌊 Underwater Drawdown")
+            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+            dd_s = (df_res['portfolio'] / df_res['portfolio'].cummax() - 1) * 100
+            dd_x2 = (df_res['benchX2'] / df_res['benchX2'].cummax() - 1) * 100
+            
+            fig_dd = go.Figure()
+            fig_dd.add_trace(go.Scatter(x=dd_s.index, y=dd_s, fill='tozeroy', name='Strategy', line=dict(color='#A855F7', width=1), fillcolor='rgba(168, 85, 247, 0.15)'))
+            fig_dd.add_trace(go.Scatter(x=dd_x2.index, y=dd_x2, name='Risk (X2)', line=dict(color='#ef4444', width=1, dash='dot')))
+            fig_dd.update_layout(paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', font=dict(family="Inter", color='#E0E0E0'), height=250, margin=dict(t=10,b=10), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)'))
+            st.plotly_chart(fig_dd, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
-        # --- TAB 4: SIGNALS ---
-        with tabs[3]:
+        # --- TAB 3: SIGNALS ---
+        with tabs[2]:
             if not arb_sig.empty:
                 st.markdown("### 🎯 Arbitrage Z-Score")
                 curr_z = arb_sig['Z_Score'].iloc[-1]
@@ -447,8 +462,42 @@ with col_main:
                 fig_z.add_trace(go.Scatter(x=arb_sig.index, y=arb_sig['Z_Score'], line=dict(color='#3b82f6', width=2)))
                 fig_z.add_hrect(y0=2.0, y1=5.0, fillcolor="rgba(239, 68, 68, 0.15)", line_width=0)
                 fig_z.add_hrect(y0=-5.0, y1=-2.0, fillcolor="rgba(16, 185, 129, 0.15)", line_width=0)
-                fig_z.update_layout(paper_bgcolor='#0a0a0f', plot_bgcolor='#0a0a0f', font=dict(family="Inter", color='#E0E0E0'), height=300, margin=dict(t=10,b=10), yaxis=dict(title="Sigma", showgrid=True, gridcolor='rgba(255,255,255,0.05)', range=[-3.5, 3.5]))
+                fig_z.update_layout(paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', font=dict(family="Inter", color='#E0E0E0'), height=300, margin=dict(t=10,b=10), yaxis=dict(title="Sigma", showgrid=True, gridcolor='rgba(255,255,255,0.05)', range=[-3.5, 3.5]))
                 st.plotly_chart(fig_z, use_container_width=True)
                 st.markdown('</div>', unsafe_allow_html=True)
             else:
                 st.info("No Arbitrage Data Available")
+
+        # --- TAB 4: VALIDATION ---
+        with tabs[3]:
+            st.markdown("### 🛡️ Robustness Testing")
+            def run_monte_carlo(data, params):
+                rets = data.pct_change().dropna()
+                res_mc = []
+                for _ in range(50):
+                    idx = np.random.choice(rets.index, size=len(rets), replace=True)
+                    boot_rets = rets.loc[idx]
+                    boot_rets.index = rets.index
+                    p_x2 = (1 + boot_rets['X2']).cumprod() * 100
+                    p_x1 = (1 + boot_rets['X1']).cumprod() * 100
+                    fake_data = pd.DataFrame({'X2': p_x2, 'X1': p_x1}, index=data.index[1:])
+                    sim, _ = BacktestEngine.run_simulation(fake_data, params)
+                    met = calculate_metrics(sim['portfolio'])
+                    res_mc.append(met)
+                return pd.DataFrame(res_mc)
+
+            if st.button("RUN MONTE CARLO (50 Runs)"):
+                with st.spinner("Simulating..."):
+                    mc_df = run_monte_carlo(data, sim_params)
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Median CAGR", f"{mc_df['CAGR'].median():.1f}%")
+                    c2.metric("Worst Case CAGR (5%)", f"{mc_df['CAGR'].quantile(0.05):.1f}%")
+                    c3.metric("Prob of Loss", f"{(mc_df['CAGR'] < 0).mean() * 100:.0f}%")
+                    fig_mc = px.histogram(mc_df, x="CAGR", nbins=15, color_discrete_sequence=['#A855F7'])
+                    fig_mc.update_layout(paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', font=dict(color='#E0E0E0'))
+                    st.plotly_chart(fig_mc, use_container_width=True)
+
+        # --- TAB 5: MONTE CARLO (DEDICATED) ---
+        with tabs[4]:
+             st.markdown("### 🎲 Monte Carlo Simulation")
+             st.info("Monte Carlo results from Validation tab will appear here for deep dive (Placeholder).")
