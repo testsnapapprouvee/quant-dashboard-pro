@@ -7,29 +7,24 @@ import plotly.express as px
 from datetime import datetime, timedelta
 
 # ==========================================
-# 0. IMPORT DES MODULES (GESTION D'ERREUR)
+# 0. IMPORT DES MODULES (AUTO-DETECTION)
 # ==========================================
-MODULES_STATUS = {"Risk": False, "Leverage": False}
+MODULES_STATUS = {"Risk": False, "Leverage": False, "Arbitrage": False}
 
+# Module 1: Risk Metrics
 try:
     from modules.risk_metrics import RiskMetrics
     MODULES_STATUS["Risk"] = True
 except ImportError:
-    pass
-
-try:
-    from modules.leverage_diagnostics import LeverageDiagnostics
-    MODULES_STATUS["Leverage"] = True
-except ImportError:
-    pass
-
-# Mock classes pour éviter le crash si les fichiers manquent
-if not MODULES_STATUS["Risk"]:
     class RiskMetrics:
         @staticmethod
         def get_full_risk_profile(series): return {}
 
-if not MODULES_STATUS["Leverage"]:
+# Module 2: Leverage Diagnostics
+try:
+    from modules.leverage_diagnostics import LeverageDiagnostics
+    MODULES_STATUS["Leverage"] = True
+except ImportError:
     class LeverageDiagnostics:
         @staticmethod
         def calculate_realized_beta(data, window=21): return pd.DataFrame()
@@ -37,6 +32,17 @@ if not MODULES_STATUS["Leverage"]:
         def calculate_leverage_health(data): return {}
         @staticmethod
         def detect_decay_regime(data, window=60): return pd.DataFrame()
+
+# Module 3: Arbitrage Signals
+try:
+    from modules.arbitrage_signals import ArbitrageSignals
+    MODULES_STATUS["Arbitrage"] = True
+except ImportError:
+    class ArbitrageSignals:
+        @staticmethod
+        def calculate_relative_strength(data, window=20): return pd.DataFrame()
+        @staticmethod
+        def get_signal_status(series): return {}
 
 # ==========================================
 # 1. CONFIGURATION & CSS (DESIGN SILENT LUXURY)
@@ -338,7 +344,6 @@ def get_data(tickers, start, end):
     if len(tickers) >= 2:
         t_x2, t_x1 = tickers[0], tickers[1]
         
-        # Gestion Robuste Flat vs MultiIndex
         if isinstance(df.columns, pd.MultiIndex):
             try:
                 if t_x2 in df.columns.levels[0] and t_x1 in df.columns.levels[0]:
@@ -431,6 +436,8 @@ with col_main:
         lev_health = LeverageDiagnostics.calculate_leverage_health(data)
         lev_beta = LeverageDiagnostics.calculate_realized_beta(data)
         lev_decay = LeverageDiagnostics.detect_decay_regime(data)
+        arb_signals = ArbitrageSignals.calculate_relative_strength(data)
+        arb_status = ArbitrageSignals.get_signal_status(arb_signals['Z_Score']) if not arb_signals.empty else {}
 
         # 3. KPI ROW 1: Performance
         k1, k2, k3, k4 = st.columns(4)
@@ -443,24 +450,34 @@ with col_main:
         if MODULES_STATUS["Risk"]:
             st.markdown("### ⚠️ Profil de Risque (Institutionnel)")
             r1, r2, r3, r4 = st.columns(4)
-            r1.metric("Ulcer Index (Douleur)", f"{risk_strat.get('Ulcer_Index', 0):.2f}", delta=f"{risk_strat.get('Ulcer_Index', 0)-risk_bench.get('Ulcer_Index', 0):.2f}", delta_color="inverse")
-            r2.metric("VaR 95% (Jour)", f"{risk_strat.get('VaR_95', 0)*100:.2f}%", delta=f"{(risk_strat.get('VaR_95', 0)-risk_bench.get('VaR_95', 0))*100:.2f}%", delta_color="inverse")
-            r3.metric("CVaR 95% (Tail)", f"{risk_strat.get('CVaR_95', 0)*100:.2f}%", delta=f"{(risk_strat.get('CVaR_95', 0)-risk_bench.get('CVaR_95', 0))*100:.2f}%", delta_color="inverse")
-            r4.metric("Volatilité Annuelle", f"{risk_strat.get('Vol_Ann', 0)*100:.1f}%", delta_color="inverse")
+            r1.metric("Ulcer Index", f"{risk_strat.get('Ulcer_Index', 0):.2f}", delta=f"{risk_strat.get('Ulcer_Index', 0)-risk_bench.get('Ulcer_Index', 0):.2f}", delta_color="inverse")
+            r2.metric("VaR 95%", f"{risk_strat.get('VaR_95', 0)*100:.2f}%", delta_color="inverse")
+            r3.metric("CVaR 95%", f"{risk_strat.get('CVaR_95', 0)*100:.2f}%", delta_color="inverse")
+            r4.metric("Vol Annuelle", f"{risk_strat.get('Vol_Ann', 0)*100:.1f}%", delta_color="inverse")
 
-        # 5. KPI ROW 3: Leverage Diagnostics (Module 2)
+        # 5. KPI ROW 3: Leverage (Module 2)
         if MODULES_STATUS["Leverage"]:
-            st.markdown("### ⚙️ Efficacité du Levier (X2 vs X1)")
+            st.markdown("### ⚙️ Efficacité du Levier")
             l1, l2, l3, l4 = st.columns(4)
             real_beta = lev_health.get('Realized_Leverage', 0)
             decay_val = lev_decay['Decay_Spread'].iloc[-1]*100 if not lev_decay.empty else 0
             
             l1.metric("Beta Réalisé", f"{real_beta:.2f}x", delta=f"{real_beta-2.0:.2f}", help="Cible: 2.0x")
             l2.metric("Vol Ratio", f"{lev_health.get('Vol_Ratio', 0):.2f}x")
-            l3.metric("Decay (60J)", f"{decay_val:.2f}%", delta=f"{decay_val:.2f}%", delta_color="normal" if decay_val > 0 else "inverse", help="Positif = Alpha, Négatif = Drag")
-            l4.metric("Tracking Error", f"{lev_health.get('Tracking_Error', 0):.4f}")
+            l3.metric("Decay (60J)", f"{decay_val:.2f}%", delta_color="normal" if decay_val > 0 else "inverse")
+            l4.metric("Tracking Err", f"{lev_health.get('Tracking_Error', 0):.4f}")
 
-        # 6. CHART PRINCIPAL (Performance)
+        # 6. KPI ROW 4: Arbitrage (Module 3)
+        if MODULES_STATUS["Arbitrage"]:
+            st.markdown("### 🎯 Signal d'Arbitrage (X2/X1)")
+            a1, a2, a3 = st.columns([1, 2, 1])
+            curr_z = arb_status.get('Current_Z', 0)
+            a1.metric("Z-Score (20D)", f"{curr_z:.2f}", delta="Rich" if curr_z>0 else "Cheap", delta_color="inverse")
+            col_z = arb_status.get('Color', 'white')
+            a2.markdown(f"<div style='border:1px solid {col_z}; border-radius:8px; padding:10px; text-align:center; background:{col_z}20;'><span style='color:{col_z}; font-weight:bold;'>{arb_status.get('Status', 'N/A')}</span></div>", unsafe_allow_html=True)
+            a3.markdown(f"<div style='text-align:center; padding-top:10px; font-size:12px; color:#888;'>Action:<br><b style='color:#fff'>{arb_status.get('Action','Wait')}</b></div>", unsafe_allow_html=True)
+
+        # 7. CHART PRINCIPAL (Performance)
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df_res.index, y=df_res['portfolio'], mode='lines', name='STRATÉGIE', line=dict(color='#667eea', width=3), fill='tozeroy', fillcolor='rgba(102, 126, 234, 0.2)'))
@@ -475,18 +492,29 @@ with col_main:
         st.plotly_chart(fig, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # 7. CHART SECONDAIRE (Rolling Beta - Module 2)
+        # 8. OSCILLATEUR Z-SCORE (Module 3)
+        if MODULES_STATUS["Arbitrage"] and not arb_signals.empty:
+            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+            fig_arb = go.Figure()
+            fig_arb.add_trace(go.Scatter(x=arb_signals.index, y=arb_signals['Z_Score'], mode='lines', name='Z-Score', line=dict(color='#3b82f6', width=2)))
+            fig_arb.add_hrect(y0=2.0, y1=5.0, fillcolor="rgba(239, 68, 68, 0.15)", line_width=0)
+            fig_arb.add_hrect(y0=-5.0, y1=-2.0, fillcolor="rgba(16, 185, 129, 0.15)", line_width=0)
+            fig_arb.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(family="Inter", color='#888'), height=200, margin=dict(t=10,b=10), yaxis=dict(title="Z-Score", showgrid=True, gridcolor='rgba(255,255,255,0.05)', range=[-3.5, 3.5]), xaxis=dict(showgrid=False), showlegend=False)
+            st.plotly_chart(fig_arb, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # 9. ROLLING BETA (Module 2)
         if MODULES_STATUS["Leverage"] and not lev_beta.empty:
             st.markdown('<div class="glass-card">', unsafe_allow_html=True)
             fig_lev = go.Figure()
-            fig_lev.add_trace(go.Scatter(x=lev_beta.index, y=lev_beta['Realized_Beta'], mode='lines', name='Rolling Beta (21D)', line=dict(color='#A855F7', width=2)))
-            fig_lev.add_hline(y=2.0, line_dash="dot", line_color="white", annotation_text="Target 2x")
-            fig_lev.add_hrect(y0=0.0, y1=1.5, fillcolor="rgba(239, 68, 68, 0.1)", line_width=0, annotation_text="INEFFICIENCY", annotation_position="bottom right")
+            fig_lev.add_trace(go.Scatter(x=lev_beta.index, y=lev_beta['Realized_Beta'], mode='lines', name='Rolling Beta', line=dict(color='#A855F7', width=2)))
+            fig_lev.add_hline(y=2.0, line_dash="dot", line_color="white")
+            fig_lev.add_hrect(y0=0.0, y1=1.5, fillcolor="rgba(239, 68, 68, 0.1)", line_width=0)
             fig_lev.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(family="Inter", color='#888'), height=200, margin=dict(t=10,b=10), yaxis=dict(title="Beta", showgrid=True, gridcolor='rgba(255,255,255,0.05)'), xaxis=dict(showgrid=False), showlegend=False)
             st.plotly_chart(fig_lev, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # 8. CHART TERTIAIRE (Underwater)
+        # 10. UNDERWATER (Standard)
         st.markdown("### 🌊 Underwater Plot")
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         dd_series = (df_res['portfolio'] / df_res['portfolio'].cummax() - 1) * 100
