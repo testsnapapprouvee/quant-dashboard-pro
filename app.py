@@ -3,242 +3,289 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 from scipy.optimize import minimize
 from datetime import datetime, timedelta
 
-# --- 1. CONFIGURATION DESIGN (NOIR & VIOLET) ---
-st.set_page_config(page_title="Predict", layout="wide", page_icon="🔮")
+# --- 1. CONFIGURATION "INSTITUTIONAL LUXURY" ---
+st.set_page_config(page_title="PREDICT | INSTITUTIONAL", layout="wide", page_icon="▪️")
 
-# Injection CSS : Noir Profond & Accents Violets (#8b5cf6)
+# Injection CSS : Le style "BlackRock / McKinsey"
 st.markdown("""
 <style>
-    /* Fond principal noir */
-    .stApp { background-color: #050505; color: #e0e0e0; }
-    
-    /* Titres et textes */
-    h1, h2, h3 { color: #ffffff !important; font-family: 'Helvetica Neue', sans-serif; }
-    
-    /* Métriques (Cartes) */
-    div[data-testid="stMetric"] {
-        background-color: #121212;
-        border: 1px solid #333;
-        border-left: 5px solid #8b5cf6;
-        border-radius: 8px;
-        padding: 10px;
-    }
-    div[data-testid="stMetricLabel"] { color: #a0a0a0; }
-    div[data-testid="stMetricValue"] { color: #c4b5fd; text-shadow: 0 0 10px rgba(139, 92, 246, 0.3); }
+    /* IMPORT FONT (Inter pour un look Suisse/Helvetica moderne) */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
 
-    /* Inputs et Sidebar */
-    section[data-testid="stSidebar"] { background-color: #0a0a0a; border-right: 1px solid #222; }
-    .stTextInput > div > div > input { background-color: #1a1a1a; color: white; border-color: #8b5cf6; }
+    /* RESET GLOBAL */
+    html, body, [class*="css"] {
+        font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+        font-weight: 300; /* Light par défaut */
+    }
+
+    /* FOND NOIR PROFOND */
+    .stApp {
+        background-color: #000000;
+        color: #ffffff;
+    }
+
+    /* TYPOGRAPHIE HIÉRARCHISÉE */
+    h1 {
+        font-weight: 600;
+        letter-spacing: -1px;
+        font-size: 2.5rem !important;
+        color: #ffffff !important;
+        margin-bottom: 0rem !important;
+    }
+    h2, h3 {
+        font-weight: 400;
+        color: #cccccc !important;
+        letter-spacing: -0.5px;
+    }
+    .caption {
+        font-size: 0.8rem;
+        color: #666666;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    /* SIDEBAR "INVISIBLE" */
+    section[data-testid="stSidebar"] {
+        background-color: #050505; /* Noir très légèrement cassé */
+        border-right: 1px solid #1a1a1a;
+    }
+
+    /* INPUTS MINIMALISTES (Bordures fines, pas de fond) */
+    .stTextInput > div > div > input {
+        background-color: #000000;
+        color: #ffffff;
+        border: 1px solid #333333;
+        border-radius: 0px; /* Angles droits */
+        font-family: 'Inter';
+    }
+    .stTextInput > div > div > input:focus {
+        border-color: #ffffff; /* Focus blanc pur */
+        box-shadow: none;
+    }
+
+    /* METRICS "RAZOR" (Pas de carte, juste de l'info) */
+    div[data-testid="stMetric"] {
+        background-color: transparent;
+        border-left: 1px solid #333; /* Ligne fine verticale */
+        padding-left: 20px;
+        border-radius: 0px;
+        box-shadow: none;
+    }
+    div[data-testid="stMetricLabel"] {
+        color: #666666; /* Gris sourd */
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    div[data-testid="stMetricValue"] {
+        color: #ffffff;
+        font-weight: 400;
+        font-size: 1.8rem;
+    }
+
+    /* BOUTONS & SLIDERS */
+    div.stSlider > div[data-baseweb="slider"] > div > div {
+        background-color: #ffffff !important; /* Curseurs blancs */
+    }
+    div.stSlider > div[data-baseweb="slider"] > div > div > div {
+        background-color: #333333 !important; /* Rails gris foncé */
+    }
+
+    /* SEPARATEURS */
+    hr {
+        border-color: #1a1a1a;
+        margin-top: 2rem;
+        margin-bottom: 2rem;
+    }
     
-    /* Boutons et Sliders */
-    div.stSlider > div[data-baseweb="slider"] > div > div { background-color: #8b5cf6 !important; }
-    button[kind="secondary"] { border-color: #8b5cf6; color: #8b5cf6; }
-    button[kind="primary"] { background-color: #8b5cf6; border: none; }
+    /* SUPPRESSION DU HEADER STREAMLIT */
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. FONCTIONS (MOTEUR) ---
+# --- 2. LOGIQUE QUANTITATIVE (IDENTIQUE MAIS ÉPURÉE) ---
 
 @st.cache_data(ttl=3600)
 def get_data_robust(tickers, start_date):
-    """Télécharge les données et gère les erreurs silencieusement"""
     try:
-        # On force unique=True pour éviter les doublons si l'utilisateur tape 2 fois le même
         tickers = list(set(tickers))
         df = yf.download(tickers, start=start_date, progress=False, group_by='ticker', auto_adjust=True)
         prices = pd.DataFrame()
-
-        # Gestion format Yahoo (MultiIndex vs Single Index)
         if len(tickers) == 1:
             t = tickers[0]
-            if 'Close' in df.columns: prices[t] = df['Close']
-            elif t in df.columns: prices[t] = df[t]['Close']
+            col = 'Close' if 'Close' in df.columns else t
+            if t in df.columns: col = df[t]['Close'] 
+            prices[t] = df['Close'] if 'Close' in df.columns else df[t]['Close']
         else:
             for t in tickers:
                 if t in df.columns: prices[t] = df[t]['Close']
-                
-        prices = prices.fillna(method='ffill').dropna()
-        return prices
-    except Exception:
-        return pd.DataFrame()
+        return prices.fillna(method='ffill').dropna()
+    except: return pd.DataFrame()
 
 def optimize(returns):
-    """Optimisation Max Sharpe"""
     n = len(returns.columns)
     def neg_sharpe(w):
         r = np.sum(returns.mean()*w)*252
         v = np.sqrt(np.dot(w.T, np.dot(returns.cov()*252, w)))
         return -r/v if v > 0 else 0
-    
     cons = ({'type':'eq', 'fun': lambda x: np.sum(x)-1})
-    bnds = tuple((0,1) for _ in range(n))
-    res = minimize(neg_sharpe, [1/n]*n, bounds=bnds, constraints=cons)
-    return res.x
+    return minimize(neg_sharpe, [1/n]*n, bounds=tuple((0,1) for _ in range(n)), constraints=cons).x
 
-# --- 3. INTERFACE PREDICT ---
+# --- 3. LAYOUT INSTITUTIONNEL ---
 
-st.title("PREDICT 🔮")
-st.caption("Plateforme d'Analyse Quantitative & Arbitrage")
+# En-tête minimaliste
+st.markdown("<h1>PREDICT</h1>", unsafe_allow_html=True)
+st.markdown("<p class='caption'>QUANTITATIVE ASSET ALLOCATION SYSTEM // V.3.0</p>", unsafe_allow_html=True)
+st.markdown("---")
 
-# --- SIDEBAR ---
+# --- SIDEBAR ÉPURÉE ---
 with st.sidebar:
-    st.header("Paramètres")
+    st.markdown("<h3 style='font-size:14px; margin-bottom:10px; color:#fff;'>ASSET SELECTION</h3>", unsafe_allow_html=True)
     
-    # Champ de recherche
-    default_tickers = "PUST.PA, LQQ.PA"
-    tickers_input = st.text_input("Tickers (Yahoo)", default_tickers, help="Séparez les tickers par une virgule")
-    
-    # Nettoyage de l'input et suppression des vides
+    # Inputs discrets
+    tickers_input = st.text_input("", "PUST.PA, LQQ.PA", placeholder="ENTER TICKERS")
     tickers = [t.strip().upper() for t in tickers_input.split(',') if t.strip() != ""]
     
-    # Période
-    years = st.slider("Historique (Années)", 1, 10, 3)
+    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True) # Spacer
+    
+    st.markdown("<h3 style='font-size:14px; margin-bottom:10px; color:#fff;'>TIMEFRAME</h3>", unsafe_allow_html=True)
+    years = st.slider("", 1, 10, 3)
     start_date = datetime.now() - timedelta(days=years*365)
     
-    st.divider()
+    st.markdown("---")
     
-    # Stratégie
-    mode = st.radio("Mode Allocation", ["Manuel", "Optimisation AI"])
+    # Stratégie Switch (Radio horizontal hack via CSS ou juste standard propre)
+    st.markdown("<h3 style='font-size:14px; margin-bottom:10px; color:#fff;'>STRATEGY MODE</h3>", unsafe_allow_html=True)
+    mode = st.radio("", ["MANUAL ALLOCATION", "MARKOWITZ OPTIMIZATION"], label_visibility="collapsed")
+    
     weights = []
-    
-    if mode == "Manuel":
-        # --- FIX CRASH INDEXERROR ---
-        if len(tickers) >= 2:
-            w = st.slider(f"Poids {tickers[0]}", 0, 100, 50)
-            weights = [w/100, 1-(w/100)]
-            st.write(f"🟣 {tickers[0]}: **{weights[0]:.0%}**")
-            st.write(f"⚪ {tickers[1]}: **{weights[1]:.0%}**")
-        elif len(tickers) == 1:
-            st.warning("⚠️ Ajoutez un 2ème ticker pour l'arbitrage (ex: , LQQ.PA)")
-            weights = [1.0] # 100% sur le seul actif
-        else:
-            st.error("❌ Entrez au moins un ticker")
-            weights = []
+    if mode == "MANUAL ALLOCATION" and len(tickers) >= 2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        w = st.slider(f"WEIGHT {tickers[0]}", 0, 100, 50)
+        weights = [w/100, 1-(w/100)]
+        # Affichage texte sobre
+        st.markdown(f"""
+        <div style='font-family:monospace; font-size:12px; color:#888; margin-top:10px;'>
+        {tickers[0]}: <span style='color:#fff'>{weights[0]:.0%}</span><br>
+        {tickers[1]}: <span style='color:#fff'>{weights[1]:.0%}</span>
+        </div>
+        """, unsafe_allow_html=True)
 
-# --- MAIN LOGIC ---
+# --- DASHBOARD CENTRAL ---
 
 if len(tickers) > 0:
-    # 1. Chargement
     data = get_data_robust(tickers, start_date)
-
+    
     if not data.empty and len(data.columns) > 0:
-        # Petit indicateur de succès
-        st.sidebar.success(f"✅ Données chargées : {len(data)} jours")
-        
         returns = data.pct_change().dropna()
         
-        # 2. Optimisation (si activée)
-        if mode == "Optimisation AI" and len(data.columns) >= 2:
-            with st.spinner("🔮 L'IA calcule l'allocation optimale..."):
-                weights = optimize(returns)
-            st.sidebar.markdown(f"**Optimisé :**")
-            # Affichage sécurisé des poids optimisés
-            for i, col in enumerate(data.columns):
-                 st.sidebar.info(f"{col}: {weights[i]:.1%}")
+        # Moteur d'Optimisation
+        if mode == "MARKOWITZ OPTIMIZATION" and len(data.columns) >= 2:
+            weights = optimize(returns)
         
-        # Sécurité taille poids (si l'utilisateur change les tickers en cours de route)
+        # Fallback poids
         if len(weights) != len(data.columns):
             weights = [1/len(data.columns)] * len(data.columns)
 
-        # 3. Calculs Portefeuille
-        port_returns = returns.dot(weights)
+        # Calculs
+        port_ret = returns.dot(weights)
+        cum_port = (1 + port_ret).cumprod() * 100
         
-        # Création des séries de prix cumulés (Base 100) pour calculs KPIs
-        cum_port = (1 + port_returns).cumprod() * 100
-        
-        # KPIs
+        # Stats Fin
         total_ret = cum_port.iloc[-1]/100 - 1
         cagr = (total_ret + 1)**(252/len(data)) - 1
-        vol = port_returns.std() * np.sqrt(252)
+        vol = port_ret.std() * np.sqrt(252)
         sharpe = cagr / vol if vol > 0 else 0
-        
-        # --- DASHBOARD ---
-        
-        # Ligne des KPIs
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("CAGR", f"{cagr:.2%}")
-        k2.metric("Sharpe Ratio", f"{sharpe:.2f}")
-        k3.metric("Volatilité", f"{vol:.2%}")
-        k4.metric("Perf Totale", f"{total_ret:.2%}")
 
-        st.divider()
-
-        # --- SECTION GRAPHIQUE AVANCÉE ---
+        # --- BLOC KPI (GRILLE STRICTE) ---
+        # Pas de colonnes serrées, de l'air.
         
-        col_opt, _ = st.columns([1, 4])
-        with col_opt:
-            show_base100 = st.toggle("Voir en Base 100", value=True)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("ANNUAL RETURN (CAGR)", f"{cagr:.2%}")
+        c2.metric("VOLATILITY (RISK)", f"{vol:.2%}")
+        c3.metric("SHARPE RATIO", f"{sharpe:.2f}")
+        c4.metric("TOTAL RETURN", f"{total_ret:.2%}")
+        
+        st.markdown("<div style='height: 40px;'></div>", unsafe_allow_html=True) # White space
+
+        # --- GRAPHIQUE INSTITUTIONNEL ---
+        # Toggle discret
+        col_toggle, _ = st.columns([1, 5])
+        with col_toggle:
+            show_base100 = st.toggle("REBASE 100", value=True)
 
         fig = go.Figure()
 
+        # Styles de lignes : Blanc pur pour le portefeuille, Gris pour les actifs
         if show_base100:
-            # MODE BASE 100
-            # 1. Le Portefeuille (Violet brillant + Remplissage)
+            # 1. Portefeuille (Blanc pur, ligne franche)
             fig.add_trace(go.Scatter(
                 x=cum_port.index, y=cum_port, 
-                name="PREDICT PORTFOLIO", 
+                name="PORTFOLIO", 
                 mode='lines',
-                line=dict(color='#8b5cf6', width=3),
-                fill='tozeroy', 
-                fillcolor='rgba(139, 92, 246, 0.1)' 
+                line=dict(color='#FFFFFF', width=1.5)
             ))
             
-            # 2. Les ETFs individuels
-            colors = ['#a0a0a0', '#4b5563', '#d1d5db'] 
+            # 2. Benchmark (Gris, ligne fine)
+            colors = ['#444444', '#666666']
             for i, col in enumerate(data.columns):
                 cum_asset = (1 + returns[col]).cumprod() * 100
                 fig.add_trace(go.Scatter(
                     x=cum_asset.index, y=cum_asset, 
-                    name=f"{col} (Base 100)",
-                    line=dict(color=colors[i % len(colors)], width=1, dash='dot')
+                    name=col,
+                    line=dict(color=colors[i % 2], width=1, dash='solid')
                 ))
-            
-            title_graph = "Performance Comparée (Base 100)"
-            y_title = "Valeur (Base 100)"
-            
+            title_g = "EQUITY CURVE (BASE 100)"
         else:
-            # MODE PRIX RÉELS
             for i, col in enumerate(data.columns):
                 fig.add_trace(go.Scatter(
                     x=data.index, y=data[col], 
-                    name=f"Prix {col}",
+                    name=col,
                     mode='lines',
-                    line=dict(width=2)
+                    line=dict(color='#FFFFFF' if i==0 else '#666666', width=1)
                 ))
-                
-            title_graph = "Historique des Prix Réels"
-            y_title = "Prix (€/$)"
+            title_g = "HISTORICAL PRICES"
 
+        # Layout Graphique "Bloomberg Terminal"
         fig.update_layout(
-            title=title_graph,
-            paper_bgcolor='rgba(0,0,0,0)', 
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='#e0e0e0'),
-            yaxis=dict(title=y_title, gridcolor='#333'),
-            xaxis=dict(gridcolor='#333'),
+            title=dict(text=title_g.upper(), font=dict(size=12, color='#666666')),
+            paper_bgcolor='#000000', # Fond noir
+            plot_bgcolor='#000000',
+            font=dict(family="Inter, sans-serif", color='#888888', size=10),
+            
+            # Grille très subtile
+            xaxis=dict(showgrid=False, linecolor='#333333', tickfont=dict(color='#666666')),
+            yaxis=dict(showgrid=True, gridcolor='#1a1a1a', gridwidth=1, zeroline=False),
+            
             hovermode="x unified",
-            legend=dict(orientation="h", y=1.02, yanchor="bottom", x=0, xanchor="left"),
-            height=500
+            margin=dict(l=0, r=0, t=30, b=0),
+            height=500,
+            showlegend=False # Légende minimaliste au survol uniquement pour garder pur
         )
         
         st.plotly_chart(fig, use_container_width=True)
         
-        # --- PARTIE ANALYSE CORRÉLATION ---
-        with st.expander("📊 Matrice de Corrélation"):
-            if len(data.columns) > 1:
-                corr = returns.corr()
-                fig_corr = px.imshow(corr, text_auto=True, color_continuous_scale='Purples', zmin=-1, zmax=1)
-                fig_corr.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
-                st.plotly_chart(fig_corr)
-            else:
-                st.info("Il faut au moins 2 actifs pour afficher la corrélation.")
+        # Petit tableau de corrélation sobre en bas
+        if len(data.columns) > 1:
+            st.markdown("<br><p class='caption'>CORRELATION MATRIX</p>", unsafe_allow_html=True)
+            corr = returns.corr()
+            # Heatmap en niveaux de gris
+            import plotly.figure_factory as ff
+            fig_corr = px.imshow(corr, text_auto=True, color_continuous_scale=['#000000', '#333333', '#FFFFFF'])
+            fig_corr.update_layout(
+                paper_bgcolor='black', plot_bgcolor='black', 
+                font=dict(color='#666666', size=10),
+                height=250, margin=dict(l=0,r=0,t=0,b=0),
+                coloraxis_showscale=False
+            )
+            st.plotly_chart(fig_corr, use_container_width=True)
 
     else:
-        st.error("❌ Ticker introuvable ou données vides.")
-        st.info("Astuce : Vérifiez qu'il y a bien une virgule entre les tickers (ex: 'PUST.PA, LQQ.PA').")
+        st.markdown("<br><br><h3 style='text-align:center; color:#333;'>NO DATA AVAILABLE. CHECK TICKERS.</h3>", unsafe_allow_html=True)
 else:
-    st.info("👋 Bienvenue sur Predict. Entrez des tickers à gauche pour commencer.")
+    st.markdown("<br><br><h3 style='text-align:center; color:#333;'>AWAITING INPUT...</h3>", unsafe_allow_html=True)
