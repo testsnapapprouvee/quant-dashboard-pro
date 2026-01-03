@@ -3,145 +3,121 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 from scipy.optimize import minimize
 from datetime import datetime, timedelta
-from quant_engine import RiskMetrics, VectorBacktester
 
-# --- 1. CONFIGURATION "BLACKROCK" ---
-st.set_page_config(page_title="Predict. | Aladdin", layout="wide", page_icon="▪️")
+# --- 1. CONFIGURATION "BLACKROCK ALADDIN" ---
+st.set_page_config(page_title="Predict.", layout="wide", page_icon="▪️")
 
-# --- 2. CSS "INSTITUTIONAL" (CORRIGÉ: Police Helvetica/Arial) ---
+# CSS "SILENT LUXURY"
 st.markdown("""
 <style>
-    /* Pas d'import Google Fonts. On utilise la police système Finance (Froid/Sec) */
-    
-    html, body, [class*="css"] {
-        font-family: 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif !important;
-    }
+    /* IMPORT FONT : Inter (Standard moderne UI) */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
 
-    /* FOND GRIS FONCÉ (Pas noir pur) */
-    .stApp { background-color: #111111; }
-    
-    /* TEXTES */
-    h1, h2, h3, p, div, span, label { color: #E6E6E6 !important; }
-    
-    /* TITRE LOGO */
-    .title-text { 
-        font-family: 'Arial', sans-serif; /* Très carré */
-        font-size: 2.8rem; 
-        font-weight: 700; 
-        color: #FFFFFF !important; 
-        letter-spacing: -1px; 
-    }
-    .accent-dot { color: #00FFAA; font-size: 2.8rem; } /* Vert Terminal Bloomberg */
-    .subtitle { 
-        font-size: 0.85rem; 
-        color: #999999 !important; 
-        font-weight: 400; 
-        letter-spacing: 1px; 
-        text-transform: uppercase; 
-        margin-top: -5px; 
-        margin-bottom: 25px; 
-        border-bottom: 1px solid #333;
-        padding-bottom: 15px;
-    }
-
-    /* SIDEBAR */
-    section[data-testid="stSidebar"] { 
-        background-color: #000000; /* Sidebar Noir pur */
-        border-right: 1px solid #333333; 
+    /* --- BASE --- */
+    .stApp {
+        background-color: #0E1117; /* Anthracite très profond (Pas noir pur) */
+        font-family: 'Inter', sans-serif;
     }
     
-    /* INPUTS (Look Terminal) */
-    .stTextInput > div > div > input { 
-        background-color: #1A1A1A; 
-        color: #E6E6E6; 
-        border: 1px solid #333; 
-        border-radius: 0px; /* Bords carrés pro */
-        font-family: 'Courier New', monospace; /* Police code pour les inputs */
-    }
-    .stTextInput > div > div > input:focus { border-color: #00FFAA; }
+    /* --- TYPOGRAPHIE --- */
+    h1, h2, h3, p, div { color: #E0E0E0; }
     
-    /* DATE PICKER */
-    .stDateInput > div > div > input { 
-        background-color: #1A1A1A; 
-        color: white; 
-        border-radius: 0px; 
+    /* Le Titre "Predict." */
+    .title-text {
+        font-size: 3rem;
+        font-weight: 600;
+        color: #FFFFFF;
+        letter-spacing: -0.05em;
+        margin-bottom: 0px;
+    }
+    .accent-dot { color: #8B5CF6; font-size: 3rem; } /* VIOLET CHIRURGICAL */
+    .subtitle {
+        font-size: 0.9rem;
+        color: #888888;
+        font-weight: 400;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-top: -10px;
+        margin-bottom: 30px;
+    }
+
+    /* --- SIDEBAR (PANNEAU DE GAUCHE) --- */
+    section[data-testid="stSidebar"] {
+        background-color: #161B22; /* Un ton plus clair que le fond pour détacher */
+        border-right: 1px solid #30363D;
     }
     
-    /* BUTTONS */
-    div.stButton > button {
-        background-color: #333;
-        color: white;
-        border-radius: 0px;
-        border: none;
+    /* --- INPUTS & SLIDERS (STYLE HAUT DE GAMME) --- */
+    .stTextInput > div > div > input {
+        background-color: #0D1117;
+        color: #FFFFFF;
+        border: 1px solid #30363D;
+        border-radius: 6px;
+        padding: 10px;
+    }
+    .stTextInput > div > div > input:focus {
+        border-color: #8B5CF6; /* Focus Violet */
+    }
+    
+    /* Sliders : La barre est grise, le curseur est blanc/violet */
+    div.stSlider > div[data-baseweb="slider"] > div > div { background-color: #8B5CF6 !important; } 
+    div.stSlider > div[data-baseweb="slider"] > div > div > div { background-color: #30363D !important; }
+
+    /* --- CARDS KPI (LES BLOCS EN HAUT) --- */
+    /* On transforme les métriques Streamlit en "Cartes" élégantes */
+    div[data-testid="stMetric"] {
+        background-color: #161B22; /* Fond carte */
+        border: 1px solid #30363D; /* Bordure subtile */
+        border-radius: 8px;
+        padding: 15px 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3); /* Ombre légère pour la profondeur */
+    }
+    div[data-testid="stMetricLabel"] {
+        color: #8B949E; /* Gris moyen lisible */
+        font-size: 0.8rem;
+        font-weight: 500;
+        text-transform: uppercase;
+    }
+    div[data-testid="stMetricValue"] {
+        color: #FFFFFF; /* Blanc Pur */
+        font-size: 1.8rem;
+        font-weight: 600;
     }
 
-    /* SLIDERS */
-    div.stSlider > div[data-baseweb="slider"] > div > div { background-color: #00FFAA !important; } 
-    div.stSlider > div[data-baseweb="slider"] > div > div > div { background-color: #FFFFFF !important; }
-
-    /* METRICS CARDS (Carrées et sobres) */
-    div[data-testid="stMetric"] { 
-        background-color: #1A1A1A; 
-        border: 1px solid #333; 
-        border-radius: 0px; /* Pas d'arrondi */
-        padding: 15px; 
-    }
-    div[data-testid="stMetricLabel"] { color: #888; font-size: 0.75rem; font-weight: 600; letter-spacing: 1px;}
-    div[data-testid="stMetricValue"] { color: #FFF; font-size: 1.6rem; font-weight: 700; font-family: 'Arial', sans-serif;}
-
-    /* TABS (Style Bloomberg) */
-    .stTabs [data-baseweb="tab-list"] { gap: 0px; border-bottom: 1px solid #333; }
-    .stTabs [data-baseweb="tab"] { 
-        background-color: transparent; 
-        border: none; 
-        color: #666; 
-        font-weight: 600; 
-        border-radius: 0px;
-        padding-right: 20px;
-        padding-left: 20px;
-    }
-    .stTabs [aria-selected="true"] { 
-        color: #00FFAA; 
-        border-bottom: 2px solid #00FFAA; 
-    }
-
-    /* NETTOYAGE */
+    /* --- GRAPHIQUE CLEAN --- */
+    /* Retirer les marges blanches et les outils */
     .js-plotly-plot .plotly .modebar { display: none !important; }
-    header, footer {visibility: hidden;}
+    
+    /* Cacher Header/Footer Streamlit */
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+
 </style>
 """, unsafe_allow_html=True)
 
-# --- FONCTIONS DATA ---
+# --- MOTEUR (Le même, fiable) ---
+
 @st.cache_data(ttl=3600)
-def get_data(tickers, start, end):
+def get_data_robust(tickers, start_date):
     try:
+        tickers = list(set([t.strip().upper() for t in tickers if t.strip() != ""]))
         if not tickers: return pd.DataFrame()
-        # Téléchargement
-        df = yf.download(tickers, start=start, end=end, progress=False, group_by='ticker', auto_adjust=True)
+        df = yf.download(tickers, start=start_date, progress=False, group_by='ticker', auto_adjust=True)
         prices = pd.DataFrame()
         
-        # Logique d'extraction (Single vs Multi ticker)
+        # Logique extraction prix
         if len(tickers) == 1:
             t = tickers[0]
-            # Vérif si MultiIndex ou pas (Yahoo change souvent)
-            if isinstance(df.columns, pd.MultiIndex): 
-                prices[t] = df['Close']
-            elif 'Close' in df.columns: 
-                prices[t] = df['Close']
+            if 'Close' in df.columns: prices[t] = df['Close']
+            elif t in df.columns and 'Close' in df[t]: prices[t] = df[t]['Close']
         else:
             for t in tickers:
-                if t in df.columns:
-                    try: prices[t] = df[t]['Close']
-                    except: pass
-                elif isinstance(df.columns, pd.MultiIndex) and t in df.columns.levels[0]:
-                     prices[t] = df[t]['Close']
-        
+                if t in df.columns and 'Close' in df[t]:
+                    prices[t] = df[t]['Close']
         return prices.fillna(method='ffill').dropna()
-    except Exception as e:
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
 def optimize(returns):
     n = len(returns.columns)
@@ -154,151 +130,158 @@ def optimize(returns):
     bounds = tuple((0,1) for _ in range(n))
     return minimize(neg_sharpe, [1/n]*n, bounds=bounds, constraints=cons).x
 
-# --- HEADER ---
+# --- LAYOUT PREMIUM ---
+
+# 1. HEADER (Titre avec le point violet injecté en HTML)
 st.markdown("""
 <div style="margin-top: -20px;">
-    <span class="title-text">BLK</span><span class="accent-dot">.</span><span class="title-text">ALADDIN</span>
-    <div class="subtitle">Institutional Risk & Allocation System</div>
+    <span class="title-text">Predict</span><span class="accent-dot">.</span>
+    <div class="subtitle">Institutional Asset Allocation</div>
 </div>
 """, unsafe_allow_html=True)
 
-# --- SIDEBAR ---
+# 2. SIDEBAR (Configuration)
 with st.sidebar:
-    st.markdown("### DATA FEED")
-    tickers_input = st.text_input("Tickers (Yahoo)", "BTC-USD, SPY, NVDA, TLT")
+    st.markdown("### CONFIGURATION")
+    tickers_input = st.text_input("Assets (Yahoo Finance)", "PUST.PA, LQQ.PA")
     tickers = [t.strip().upper() for t in tickers_input.split(',') if t.strip() != ""]
     
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("### PERIOD")
-    # LE VRAI CALENDRIER
-    date_range = st.date_input(
-        "Select Range",
-        value=(datetime.now() - timedelta(days=365*2), datetime.now()),
-        format="DD/MM/YYYY"
-    )
+    years = st.slider("Lookback Period (Years)", 1, 10, 3)
+    start_date = datetime.now() - timedelta(days=years*365)
+    
+    st.markdown("---")
+    st.markdown("### STRATEGY")
+    
+    # Custom Radio styling is hard, using standard but clean
+    mode = st.radio("Allocation Mode", ["Fixed Weight", "Max Sharpe (AI)"], label_visibility="collapsed")
+    
+    weights = []
+    if mode == "Fixed Weight" and len(tickers) >= 2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        w = st.slider(f"Weight: {tickers[0]}", 0, 100, 50)
+        weights = [w/100, 1-(w/100)]
+        
+        # Affichage propre des poids
+        st.markdown(f"""
+        <div style="background-color: #21262d; padding: 10px; border-radius: 4px; margin-top: 10px; border: 1px solid #30363d;">
+            <div style="display:flex; justify-content:space-between; color:#C9D1D9; font-size:0.9rem;">
+                <span>{tickers[0]}</span> <span><b>{weights[0]:.0%}</b></span>
+            </div>
+            <div style="display:flex; justify-content:space-between; color:#8B949E; font-size:0.9rem; margin-top:5px;">
+                <span>{tickers[1]}</span> <span>{weights[1]:.0%}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-# --- CORE LOGIC ---
-if len(tickers) > 0 and isinstance(date_range, tuple) and len(date_range) == 2:
-    start_d, end_d = date_range
-    data = get_data(tickers, start_d, end_d)
+# 3. DASHBOARD PRINCIPAL
+if len(tickers) > 0:
+    data = get_data_robust(tickers, start_date)
     
     if not data.empty:
         returns = data.pct_change().dropna()
         
-        # --- TABS NAVIGATION ---
-        tab1, tab2, tab3 = st.tabs(["ALLOCATION", "CORRELATION", "BACKTEST"])
+        # Logique Poids
+        if mode == "Max Sharpe (AI)" and len(data.columns) >= 2:
+            weights = optimize(returns)
+        if len(weights) != len(data.columns):
+            weights = [1/len(data.columns)] * len(data.columns)
+
+        # Calculs Core
+        port_ret = returns.dot(weights)
+        cum_port = (1 + port_ret).cumprod() * 100
         
-        # === 1. PORTFOLIO ALLOCATION ===
-        with tab1:
-            st.markdown("<br>", unsafe_allow_html=True)
-            c1, c2 = st.columns([1, 3])
-            with c1:
-                mode = st.radio("Mode", ["Equal Weight", "Max Sharpe"], label_visibility="collapsed")
-            
-            # Calcul Poids
-            if mode == "Max Sharpe" and len(data.columns) >= 2:
-                weights = optimize(returns)
-            else:
-                weights = [1/len(data.columns)] * len(data.columns)
-            
-            # Performance Portefeuille
-            port_ret = returns.dot(weights)
-            cum_port = (1 + port_ret).cumprod() * 100
-            
-            # Metrics
-            total_ret = cum_port.iloc[-1]/100 - 1
-            vol = port_ret.std() * np.sqrt(252)
-            sharpe = total_ret / vol if vol > 0 else 0
-            
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Total Return", f"{total_ret:.2%}")
-            k2.metric("Sharpe Ratio", f"{sharpe:.2f}")
-            k3.metric("Annual Vol", f"{vol:.2%}")
-            
-            # Graphique Ligne (Style Terminal)
-            fig = go.Figure()
-            # Portefeuille (Blanc/Vert)
+        # KPIs
+        total_ret = cum_port.iloc[-1]/100 - 1
+        cagr = (total_ret + 1)**(252/len(data)) - 1
+        vol = port_ret.std() * np.sqrt(252)
+        sharpe = cagr / vol if vol > 0 else 0
+
+        # --- SECTION KPI (CARDS) ---
+        # Utilisation de colonnes avec un gap pour aérer
+        col1, col2, col3, col4 = st.columns(4, gap="medium")
+        
+        col1.metric("CAGR (Annual)", f"{cagr:.2%}")
+        col2.metric("Sharpe Ratio", f"{sharpe:.2f}")
+        col3.metric("Volatility", f"{vol:.2%}")
+        col4.metric("Total Return", f"{total_ret:.2%}")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # --- SECTION GRAPHIQUE ---
+        
+        # Toggle Switch (Checkbox stylisée)
+        show_base100 = st.toggle("Compare Base 100", value=True)
+
+        fig = go.Figure()
+
+        # COULEURS :
+        # Portefeuille = Violet (#8B5CF6) pour le lier à la marque
+        # Benchmark/Actifs = Gris / Blanc cassé
+        
+        if show_base100:
+            # 1. Portefeuille (HERO)
             fig.add_trace(go.Scatter(
-                x=cum_port.index, y=cum_port, name="PORTFOLIO", 
-                line=dict(color='#00FFAA', width=2)
+                x=cum_port.index, y=cum_port, 
+                name="PREDICT PORTFOLIO", 
+                mode='lines',
+                line=dict(color='#8B5CF6', width=2.5), # VIOLET PREDICT
+                # Petit dégradé sous la courbe pour effet premium
+                fill='tozeroy',
+                fillcolor='rgba(139, 92, 246, 0.1)' 
             ))
-            # Benchmark Assets (Gris sombre)
-            for col in data.columns:
-                asset_curve = (1 + returns[col]).cumprod() * 100
+            
+            # 2. Actifs (CONTEXTE)
+            colors = ['#E6EDF3', '#6E7681', '#484F58'] # Blanc sale, Gris moyen, Gris foncé
+            for i, col in enumerate(data.columns):
+                cum_asset = (1 + returns[col]).cumprod() * 100
                 fig.add_trace(go.Scatter(
-                    x=asset_curve.index, y=asset_curve, name=col, 
-                    line=dict(color='#444', width=1), opacity=0.7
+                    x=cum_asset.index, y=cum_asset, 
+                    name=col,
+                    line=dict(color=colors[i % len(colors)], width=1, dash='solid'),
+                    opacity=0.7 # Légèrement transparent pour ne pas voler la vedette
                 ))
-            
-            fig.update_layout(
-                paper_bgcolor='rgba(0,0,0,0)', 
-                plot_bgcolor='rgba(0,0,0,0)', 
-                font=dict(family="Arial", color='#888'),
-                xaxis=dict(showgrid=False, linecolor='#333'), 
-                yaxis=dict(showgrid=True, gridcolor='#222'), 
-                margin=dict(l=0,r=0,t=20,b=0),
-                height=450
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            y_title = "Growth (Base 100)"
+        else:
+            # Mode Prix brut
+            for i, col in enumerate(data.columns):
+                fig.add_trace(go.Scatter(
+                    x=data.index, y=data[col], name=col,
+                    line=dict(width=1.5)
+                ))
+            y_title = "Price"
 
-        # === 2. MATRICE DE CORRELATION ===
-        with tab2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            corr = returns.corr()
+        # DESIGN GRAPHIQUE "MCKINSEY"
+        fig.update_layout(
+            # Fond Transparent (se fond dans l'app)
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
             
-            # Heatmap propre
-            fig_corr = px.imshow(
-                corr, 
-                text_auto=".2f",
-                color_continuous_scale=[[0, 'black'], [1, '#00FFAA']], # Noir vers Vert Terminal
-                aspect="auto"
-            )
-            fig_corr.update_layout(
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(family="Arial", color='#EEE'),
-                height=500
-            )
-            st.plotly_chart(fig_corr, use_container_width=True)
-
-        # === 3. BACKTEST QUANT (ENGINE) ===
-        with tab3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            col_b1, col_b2, col_b3 = st.columns(3)
-            asset_bt = col_b1.selectbox("Asset", tickers)
-            sma_s = col_b2.number_input("Short MA", 5, 50, 20)
-            sma_l = col_b3.number_input("Long MA", 50, 200, 50)
+            # Police
+            font=dict(family="Inter, sans-serif", color='#8B949E', size=11),
             
-            if asset_bt:
-                # Appel Moteur
-                bt = VectorBacktester(data[asset_bt])
-                res = bt.run_strategy(sma_s, sma_l)
-                met = RiskMetrics.get_metrics(res['Strat_Ret'])
-                
-                # KPIs Backtest
-                b1, b2, b3, b4 = st.columns(4)
-                b1.metric("Strategy Ret", f"{(res['Curve'].iloc[-1]/100 - 1):.2%}")
-                b2.metric("Max Drawdown", f"{met['MaxDD']:.2%}")
-                b3.metric("Sharpe", f"{met['Sharpe']:.2f}")
-                b4.metric("VaR 95%", f"{met['VaR']:.2%}")
-                
-                # Chart Backtest
-                fig_bt = go.Figure()
-                fig_bt.add_trace(go.Scatter(x=res.index, y=res['Curve'], name="STRATEGY", line=dict(color='#00FFAA', width=2)))
-                fig_bt.add_trace(go.Scatter(x=res.index, y=res['BH_Curve'], name="BUY & HOLD", line=dict(color='#666', width=1, dash='dot')))
-                
-                fig_bt.update_layout(
-                    paper_bgcolor='rgba(0,0,0,0)', 
-                    plot_bgcolor='rgba(0,0,0,0)', 
-                    font=dict(family="Arial", color='#888'),
-                    xaxis=dict(showgrid=False, linecolor='#333'), 
-                    yaxis=dict(showgrid=True, gridcolor='#222'),
-                    margin=dict(l=0,r=0,t=20,b=0),
-                    height=450
-                )
-                st.plotly_chart(fig_bt, use_container_width=True)
-
+            # Grille très fine
+            xaxis=dict(showgrid=False, linecolor='#30363D'),
+            yaxis=dict(
+                title=y_title, 
+                showgrid=True, 
+                gridcolor='#21262D', # Grille à peine visible
+                zeroline=False
+            ),
+            
+            # Légende
+            legend=dict(
+                orientation="h", y=1.05, x=0,
+                font=dict(color="#C9D1D9")
+            ),
+            
+            hovermode="x unified",
+            margin=dict(l=0, r=0, t=20, b=0),
+            height=500
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
     else:
-        st.warning("⚠️ Waiting for data stream...")
+        st.warning("No Data. Please check tickers.")
 else:
-    st.info("System Ready. Select date range.")
+    st.info("Awaiting input.")
