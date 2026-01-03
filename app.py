@@ -380,6 +380,7 @@ with col_main:
         tabs = st.tabs(["Performance", "Risk & Leverage", "Signals", "Validation", "Monte Carlo"])
         
         # --- TAB 1: DASHBOARD ---
+        # --- TAB 1: DASHBOARD ---
         with tabs[0]:
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("CAGR Strat", f"{met_s['CAGR']:.1f}%", delta=f"{met_s['CAGR']-met_x2['CAGR']:.1f}% vs X2")
@@ -388,38 +389,74 @@ with col_main:
             k4.metric("Trades", len(trades))
             
             st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df_res.index, y=df_res['portfolio'], name='STRATEGY', 
-                                     line=dict(color='#A855F7', width=3), fill='tozeroy', fillcolor='rgba(168, 85, 247, 0.1)'))
+            
+            # --- CHART DUAL (Performance + Allocation) ---
+            from plotly.subplots import make_subplots
+            
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                                vertical_spacing=0.03, 
+                                row_heights=[0.7, 0.3],
+                                subplot_titles=("Performance Comparée", "Attribution d'Actifs (Zone d'Exposition)"))
+            
+            # 1. Performance (Haut)
+            fig.add_trace(go.Scatter(x=df_res.index, y=df_res['portfolio'], name='STRATÉGIE', 
+                                     line=dict(color='#A855F7', width=2)), row=1, col=1)
             fig.add_trace(go.Scatter(x=df_res.index, y=df_res['benchX2'], name='Risk (X2)', 
-                                     line=dict(color='#ef4444', width=1.5, dash='dot')))
+                                     line=dict(color='#ef4444', width=1.5, dash='dot')), row=1, col=1)
             fig.add_trace(go.Scatter(x=df_res.index, y=df_res['benchX1'], name='Safe (X1)', 
-                                     line=dict(color='#10b981', width=1.5, dash='dot')))
+                                     line=dict(color='#10b981', width=1.5, dash='dot')), row=1, col=1)
             
-            # Auto-zoom
-            min_val = min(df_res['portfolio'].min(), df_res['benchX2'].min(), df_res['benchX1'].min())
-            max_val = max(df_res['portfolio'].max(), df_res['benchX2'].max(), df_res['benchX1'].max())
-            
+            # Trades markers
             for t in trades:
-                col = '#ef4444' if 'CRASH' in t['label'] else ('#f59e0b' if 'PRUDENCE' in t['label'] else '#10b981')
-                fig.add_annotation(x=t['date'], y=df_res.loc[t['date']]['portfolio'], text="▼" if t['to']!=0 else "▲", 
-                                   showarrow=False, font=dict(color=col, size=14))
-                
-            fig.update_layout(paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', font=dict(family="Inter", color='#E0E0E0'), 
-                              height=450, margin=dict(l=40, r=40, t=20, b=40), xaxis=dict(showgrid=False, linecolor='#333'), 
-                              yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', range=[min_val*0.9, max_val*1.1]), hovermode="x unified", legend=dict(orientation="h", y=1.05))
+                c = '#ef4444' if 'CRASH' in t['label'] else ('#f59e0b' if 'PRUDENCE' in t['label'] else '#10b981')
+                symbol = "▼" if t['to'] != 0 else "▲"
+                fig.add_annotation(x=t['date'], y=df_res.loc[t['date']]['portfolio'], 
+                                   text=symbol, showarrow=False, font=dict(color=c, size=14), row=1, col=1)
+
+            # 2. Allocation (Bas) - Stacked Area
+            # On crée des séries pour l'area chart
+            # 0=Risk(X2), 1=Prudence(Mix), 2=Crash(X1)
+            # Pour visualiser, on plot le % de X2 et % de X1
+            
+            fig.add_trace(go.Scatter(
+                x=df_res.index, y=df_res['weight_x2']*100, name='Alloc X2 (Risk)',
+                stackgroup='one', line=dict(width=0), fillcolor='rgba(239, 68, 68, 0.5)'
+            ), row=2, col=1)
+            
+            fig.add_trace(go.Scatter(
+                x=df_res.index, y=df_res['weight_x1']*100, name='Alloc X1 (Safe)',
+                stackgroup='one', line=dict(width=0), fillcolor='rgba(16, 185, 129, 0.5)'
+            ), row=2, col=1)
+
+            # Layout Clean
+            fig.update_layout(
+                paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', 
+                font=dict(family="Inter", color='#E0E0E0'), 
+                height=600, margin=dict(l=40, r=40, t=40, b=40), 
+                xaxis2=dict(showgrid=False, linecolor='#333'), 
+                yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', title="NAV"),
+                yaxis2=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', title="Alloc %", range=[0, 100]),
+                hovermode="x unified", legend=dict(orientation="h", y=1.02)
+            )
             st.plotly_chart(fig, use_container_width=True)
+            
+            # --- LÉGENDE EXPLICITE ---
+            st.markdown("""
+            <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; font-size: 12px; color: #aaa;">
+                <strong>🔍 GUIDE DE LECTURE :</strong><br>
+                <span style="color:#A855F7">● Stratégie</span> : Courbe de performance de votre portefeuille.<br>
+                <span style="color:#ef4444">●● Risk (X2)</span> : Benchmark agressif (Buy & Hold Levier).<br>
+                <span style="color:#10b981">●● Safe (X1)</span> : Benchmark défensif (Buy & Hold Sans Levier).<br><br>
+                <strong>SIGNAUX (Triangles) :</strong><br>
+                <span style="color:#10b981">▲ Achat Offensif</span> : Le modèle détecte une tendance haussière, passage à 100% X2.<br>
+                <span style="color:#ef4444">▼ Vente Panique</span> : Le modèle détecte un Crash imminent, passage à 100% X1 (ou Cash).<br>
+                <span style="color:#f59e0b">▼ Prudence</span> : Le modèle réduit le risque (Mix X2/X1) suite à une baisse modérée.<br><br>
+                <strong>GRAPHIQUE DU BAS (Allocation) :</strong><br>
+                Montre la répartition de votre argent au fil du temps. <span style="color:#ef4444">Rouge = Risque</span>, <span style="color:#10b981">Vert = Sécurité</span>.
+            </div>
+            """, unsafe_allow_html=True)
+            
             st.markdown('</div>', unsafe_allow_html=True)
-
-            st.markdown("### 🏆 Performance Attribution")
-            p_data = {
-                "Metric": ["CAGR", "Vol (Ann)", "Sharpe", "MaxDD", "Calmar", "Cumul"],
-                "Strategy": [f"{met_s['CAGR']:.1f}%", f"{met_s['Vol']:.1f}%", f"{met_s['Sharpe']:.2f}", f"{met_s['MaxDD']:.1f}%", f"{met_s['Calmar']:.2f}", f"{met_s['Cumul']:.1f}%"],
-                "Risk (X2)": [f"{met_x2['CAGR']:.1f}%", f"{met_x2['Vol']:.1f}%", f"{met_x2['Sharpe']:.2f}", f"{met_x2['MaxDD']:.1f}%", f"{met_x2['Calmar']:.2f}", f"{met_x2['Cumul']:.1f}%"],
-                "Safe (X1)": [f"{met_x1['CAGR']:.1f}%", f"{met_x1['Vol']:.1f}%", f"{met_x1['Sharpe']:.2f}", f"{met_x1['MaxDD']:.1f}%", f"{met_x1['Calmar']:.2f}", f"{met_x1['Cumul']:.1f}%"]
-            }
-            st.markdown(pd.DataFrame(p_data).style.hide(axis="index").set_properties(**{'background-color': '#0A0A0F', 'color': '#eee', 'border-color': '#333'}).to_html(), unsafe_allow_html=True)
-
         # --- TAB 2: RISK & LEVERAGE ---
         with tabs[1]:
             c1, c2 = st.columns(2)
@@ -465,6 +502,7 @@ with col_main:
                 fig_z.add_hrect(y0=-5.0, y1=-2.0, fillcolor="rgba(16, 185, 129, 0.15)", line_width=0)
                 fig_z.update_layout(paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', font=dict(family="Inter", color='#E0E0E0'), height=300, margin=dict(t=10,b=10), yaxis=dict(title="Sigma", showgrid=True, gridcolor='rgba(255,255,255,0.05)', range=[-3.5, 3.5]))
                 st.plotly_chart(fig_z, use_container_width=True)
+                
                 st.markdown('</div>', unsafe_allow_html=True)
             else:
                 st.info("No Arbitrage Data Available")
@@ -499,6 +537,87 @@ with col_main:
                     st.plotly_chart(fig_mc, use_container_width=True)
 
         # --- TAB 5: MONTE CARLO (DEDICATED) ---
+        
+        # --- TAB 5: FORECAST (MONTE CARLO PRO) ---
         with tabs[4]:
-             st.markdown("### 🎲 Monte Carlo Simulation")
-             st.info("Monte Carlo results from Validation tab will appear here for deep dive (Placeholder).")
+            st.markdown("### 🔮 Prévisions de Marché (Fan Chart)")
+            st.caption("Projection probabiliste du portefeuille sur les 252 prochains jours (1 an), basée sur la volatilité récente.")
+            
+            if st.button("Générer les Scénarios (200 Simulations)"):
+                with st.spinner("Calcul des trajectoires futures..."):
+                    # 1. Préparation des données pour simulation
+                    # On prend les rendements récents de la stratégie pour projeter
+                    strat_returns = df_res['portfolio'].pct_change().dropna()
+                    last_price = df_res['portfolio'].iloc[-1]
+                    
+                    # Simulation (Méthode Bootstrap simple pour l'exemple)
+                    n_sims = 200
+                    horizon = 252
+                    sim_paths = np.zeros((horizon, n_sims))
+                    
+                    # On utilise les 2 dernières années de rendements pour être "actuel"
+                    recent_returns = strat_returns.tail(500).values 
+                    
+                    for i in range(n_sims):
+                        daily_returns = np.random.choice(recent_returns, size=horizon, replace=True)
+                        sim_paths[:, i] = last_price * np.cumprod(1 + daily_returns)
+                    
+                    # 2. Calcul des Percentiles pour le Fan Chart
+                    median_path = np.median(sim_paths, axis=1)
+                    p95_path = np.percentile(sim_paths, 95, axis=1)
+                    p05_path = np.percentile(sim_paths, 5, axis=1)
+                    p75_path = np.percentile(sim_paths, 75, axis=1)
+                    p25_path = np.percentile(sim_paths, 25, axis=1)
+                    
+                    x_axis = np.arange(horizon)
+                    
+                    # 3. KPI de Fin de simulation
+                    final_prices = sim_paths[-1, :]
+                    med_final = np.median(final_prices)
+                    opt_final = np.percentile(final_prices, 95)
+                    pess_final = np.percentile(final_prices, 5)
+                    
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Prix Médian (1A)", f"{med_final:.0f}", delta=f"{(med_final/last_price-1)*100:.1f}%")
+                    c2.metric("Scénario Optimiste (95%)", f"{opt_final:.0f}", delta=f"{(opt_final/last_price-1)*100:.1f}%")
+                    c3.metric("Scénario Pessimiste (5%)", f"{pess_final:.0f}", delta=f"{(pess_final/last_price-1)*100:.1f}%", delta_color="inverse")
+                    
+                    # 4. Construction du Graphique (Fan Chart)
+                    fig_mc = go.Figure()
+                    
+                    # Zone Extrême (5-95%)
+                    fig_mc.add_trace(go.Scatter(
+                        x=x_axis, y=p95_path, mode='lines', line=dict(width=0), showlegend=False, hoverinfo='skip'
+                    ))
+                    fig_mc.add_trace(go.Scatter(
+                        x=x_axis, y=p05_path, mode='lines', line=dict(width=0), fill='tonexty', 
+                        fillcolor='rgba(168, 85, 247, 0.1)', name='Intervalle 95%'
+                    ))
+                    
+                    # Zone Centrale (25-75%) - Plus foncée
+                    fig_mc.add_trace(go.Scatter(
+                        x=x_axis, y=p75_path, mode='lines', line=dict(width=0), showlegend=False, hoverinfo='skip'
+                    ))
+                    fig_mc.add_trace(go.Scatter(
+                        x=x_axis, y=p25_path, mode='lines', line=dict(width=0), fill='tonexty', 
+                        fillcolor='rgba(168, 85, 247, 0.2)', name='Intervalle 50%'
+                    ))
+                    
+                    # Ligne Médiane
+                    fig_mc.add_trace(go.Scatter(
+                        x=x_axis, y=median_path, mode='lines', name='Trajectoire Médiane', 
+                        line=dict(color='#A855F7', width=3)
+                    ))
+                    
+                    # Ligne de départ
+                    fig_mc.add_hline(y=last_price, line_dash="dot", line_color="white", annotation_text="Aujourd'hui")
+
+                    fig_mc.update_layout(
+                        paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', 
+                        font=dict(family="Inter", color='#E0E0E0'), 
+                        height=500, title="Projection Future (Cône d'Incertitude)",
+                        xaxis_title="Jours Ouvrés (Futur)", yaxis_title="Valeur Portefeuille"
+                    )
+                    st.plotly_chart(fig_mc, use_container_width=True)
+                    
+                    st.info("ℹ️ Ce graphique projette 200 futurs possibles basés sur la volatilité récente de votre stratégie. La zone sombre contient 50% des scénarios probables.")
