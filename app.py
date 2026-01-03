@@ -6,189 +6,173 @@ import plotly.graph_objects as go
 from scipy.optimize import minimize
 from datetime import datetime, timedelta
 
-# --- 1. CONFIGURATION "INSTITUTIONAL LUXURY" ---
-st.set_page_config(page_title="PREDICT | INSTITUTIONAL", layout="wide", page_icon="▪️")
+# --- 1. CONFIGURATION "SILENT LUXURY" ---
+st.set_page_config(page_title="Predict.", layout="wide", page_icon="▪️")
 
-# Injection CSS : Le style "BlackRock / McKinsey"
+# Injection CSS : Noir Profond, Typo Suisse, Accent Violet subtil
 st.markdown("""
 <style>
-    /* IMPORT FONT (Inter pour un look Suisse/Helvetica moderne) */
+    /* IMPORT FONT Inter */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
 
     /* RESET GLOBAL */
     html, body, [class*="css"] {
-        font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
-        font-weight: 300; /* Light par défaut */
-    }
-
-    /* FOND NOIR PROFOND */
-    .stApp {
+        font-family: 'Inter', sans-serif;
+        font-weight: 300;
         background-color: #000000;
-        color: #ffffff;
+        color: #e5e5e5;
     }
 
-    /* TYPOGRAPHIE HIÉRARCHISÉE */
-    h1 {
+    /* FOND NOIR ABSOLU */
+    .stApp { background-color: #000000; }
+
+    /* TITRE LOGO */
+    .logo-text {
+        font-family: 'Inter', sans-serif;
         font-weight: 600;
-        letter-spacing: -1px;
-        font-size: 2.5rem !important;
-        color: #ffffff !important;
-        margin-bottom: 0rem !important;
+        font-size: 3.5rem;
+        letter-spacing: -1.5px;
+        color: #ffffff;
+        margin-bottom: 0;
+        line-height: 1;
     }
-    h2, h3 {
-        font-weight: 400;
-        color: #cccccc !important;
-        letter-spacing: -0.5px;
-    }
-    .caption {
-        font-size: 0.8rem;
-        color: #666666;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
+    .dot { color: #8b5cf6; } /* LE POINT VIOLET */
 
-    /* SIDEBAR "INVISIBLE" */
+    /* SIDEBAR INVISIBLE */
     section[data-testid="stSidebar"] {
-        background-color: #050505; /* Noir très légèrement cassé */
+        background-color: #050505;
         border-right: 1px solid #1a1a1a;
     }
 
-    /* INPUTS MINIMALISTES (Bordures fines, pas de fond) */
+    /* INPUTS & WIDGETS */
     .stTextInput > div > div > input {
-        background-color: #000000;
-        color: #ffffff;
-        border: 1px solid #333333;
-        border-radius: 0px; /* Angles droits */
-        font-family: 'Inter';
+        background-color: #0a0a0a;
+        color: #fff;
+        border: 1px solid #333;
+        border-radius: 0;
     }
-    .stTextInput > div > div > input:focus {
-        border-color: #ffffff; /* Focus blanc pur */
-        box-shadow: none;
-    }
+    .stTextInput > div > div > input:focus { border-color: #8b5cf6; }
 
-    /* METRICS "RAZOR" (Pas de carte, juste de l'info) */
+    /* METRICS "RAZOR" (Minimaliste avec ligne verticale) */
     div[data-testid="stMetric"] {
         background-color: transparent;
-        border-left: 1px solid #333; /* Ligne fine verticale */
-        padding-left: 20px;
-        border-radius: 0px;
+        border-left: 1px solid #333;
+        padding-left: 15px;
         box-shadow: none;
     }
     div[data-testid="stMetricLabel"] {
-        color: #666666; /* Gris sourd */
-        font-size: 0.75rem;
-        text-transform: uppercase;
+        color: #666666;
+        font-size: 0.7rem;
         letter-spacing: 1px;
+        text-transform: uppercase;
     }
     div[data-testid="stMetricValue"] {
         color: #ffffff;
+        font-size: 1.6rem;
         font-weight: 400;
-        font-size: 1.8rem;
     }
 
-    /* BOUTONS & SLIDERS */
-    div.stSlider > div[data-baseweb="slider"] > div > div {
-        background-color: #ffffff !important; /* Curseurs blancs */
-    }
-    div.stSlider > div[data-baseweb="slider"] > div > div > div {
-        background-color: #333333 !important; /* Rails gris foncé */
-    }
-
-    /* SEPARATEURS */
-    hr {
-        border-color: #1a1a1a;
-        margin-top: 2rem;
-        margin-bottom: 2rem;
-    }
+    /* CHARTS */
+    .js-plotly-plot .plotly .modebar { display: none !important; } /* Cache la barre d'outils plotly */
     
-    /* SUPPRESSION DU HEADER STREAMLIT */
+    /* ELEMENTS CACHÉS */
     header {visibility: hidden;}
     footer {visibility: hidden;}
+    hr { border-color: #1a1a1a; }
 
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. LOGIQUE QUANTITATIVE (IDENTIQUE MAIS ÉPURÉE) ---
+# --- 2. MOTEUR QUANTITATIF (ROBUSTE) ---
 
 @st.cache_data(ttl=3600)
 def get_data_robust(tickers, start_date):
+    """Téléchargement sécurisé des données"""
     try:
-        tickers = list(set(tickers))
+        # Nettoyage des doublons et des espaces
+        tickers = list(set([t.strip().upper() for t in tickers if t.strip() != ""]))
+        if not tickers: return pd.DataFrame()
+
         df = yf.download(tickers, start=start_date, progress=False, group_by='ticker', auto_adjust=True)
         prices = pd.DataFrame()
+
+        # Gestion des formats Yahoo (Parfois complexe)
         if len(tickers) == 1:
             t = tickers[0]
-            col = 'Close' if 'Close' in df.columns else t
-            if t in df.columns: col = df[t]['Close'] 
-            prices[t] = df['Close'] if 'Close' in df.columns else df[t]['Close']
+            # Vérifie si 'Close' existe directement ou sous le ticker
+            if 'Close' in df.columns: prices[t] = df['Close']
+            elif t in df.columns and 'Close' in df[t]: prices[t] = df[t]['Close']
         else:
             for t in tickers:
-                if t in df.columns: prices[t] = df[t]['Close']
+                if t in df.columns and 'Close' in df[t]:
+                    prices[t] = df[t]['Close']
+        
+        # Nettoyage final : Forward Fill (jours fériés) puis Drop NA
         return prices.fillna(method='ffill').dropna()
-    except: return pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
 
 def optimize(returns):
+    """Optimisation de portefeuille (Markowitz)"""
     n = len(returns.columns)
+    if n < 2: return [1.0] # Pas d'optimisation si 1 seul actif
+    
     def neg_sharpe(w):
         r = np.sum(returns.mean()*w)*252
         v = np.sqrt(np.dot(w.T, np.dot(returns.cov()*252, w)))
         return -r/v if v > 0 else 0
-    cons = ({'type':'eq', 'fun': lambda x: np.sum(x)-1})
-    return minimize(neg_sharpe, [1/n]*n, bounds=tuple((0,1) for _ in range(n)), constraints=cons).x
-
-# --- 3. LAYOUT INSTITUTIONNEL ---
-
-# En-tête minimaliste
-st.markdown("<h1>PREDICT</h1>", unsafe_allow_html=True)
-st.markdown("<p class='caption'>QUANTITATIVE ASSET ALLOCATION SYSTEM // V.3.0</p>", unsafe_allow_html=True)
-st.markdown("---")
-
-# --- SIDEBAR ÉPURÉE ---
-with st.sidebar:
-    st.markdown("<h3 style='font-size:14px; margin-bottom:10px; color:#fff;'>ASSET SELECTION</h3>", unsafe_allow_html=True)
     
-    # Inputs discrets
-    tickers_input = st.text_input("", "PUST.PA, LQQ.PA", placeholder="ENTER TICKERS")
+    cons = ({'type':'eq', 'fun': lambda x: np.sum(x)-1})
+    bounds = tuple((0,1) for _ in range(n))
+    res = minimize(neg_sharpe, [1/n]*n, bounds=bounds, constraints=cons)
+    return res.x
+
+# --- 3. INTERFACE PREDICT. ---
+
+# LOGO / TITRE
+st.markdown('<div class="logo-text">Predict<span class="dot">.</span></div>', unsafe_allow_html=True)
+st.markdown("<div style='color:#444; font-size: 0.8rem; letter-spacing: 2px; margin-bottom: 40px;'>ALGORITHMIC ASSET ALLOCATION</div>", unsafe_allow_html=True)
+
+# --- SIDEBAR ---
+with st.sidebar:
+    st.markdown("<h3 style='color:#fff; font-size:12px; margin-bottom:5px;'>TICKERS</h3>", unsafe_allow_html=True)
+    tickers_input = st.text_input("Symbole", "PUST.PA, LQQ.PA", help="Séparez par une virgule")
+    
+    # Traitement propre des tickers
     tickers = [t.strip().upper() for t in tickers_input.split(',') if t.strip() != ""]
     
-    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True) # Spacer
-    
-    st.markdown("<h3 style='font-size:14px; margin-bottom:10px; color:#fff;'>TIMEFRAME</h3>", unsafe_allow_html=True)
-    years = st.slider("", 1, 10, 3)
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color:#fff; font-size:12px; margin-bottom:5px;'>TIMEFRAME</h3>", unsafe_allow_html=True)
+    years = st.slider("Années", 1, 10, 3, label_visibility="collapsed")
     start_date = datetime.now() - timedelta(days=years*365)
     
     st.markdown("---")
     
-    # Stratégie Switch (Radio horizontal hack via CSS ou juste standard propre)
-    st.markdown("<h3 style='font-size:14px; margin-bottom:10px; color:#fff;'>STRATEGY MODE</h3>", unsafe_allow_html=True)
-    mode = st.radio("", ["MANUAL ALLOCATION", "MARKOWITZ OPTIMIZATION"], label_visibility="collapsed")
+    mode = st.radio("STRATEGY", ["Manual", "Auto-Optimize"], label_visibility="collapsed")
     
     weights = []
-    if mode == "MANUAL ALLOCATION" and len(tickers) >= 2:
+    if mode == "Manual" and len(tickers) >= 2:
         st.markdown("<br>", unsafe_allow_html=True)
-        w = st.slider(f"WEIGHT {tickers[0]}", 0, 100, 50)
+        w = st.slider(f"{tickers[0]} Weight", 0, 100, 50)
         weights = [w/100, 1-(w/100)]
         # Affichage texte sobre
-        st.markdown(f"""
-        <div style='font-family:monospace; font-size:12px; color:#888; margin-top:10px;'>
-        {tickers[0]}: <span style='color:#fff'>{weights[0]:.0%}</span><br>
-        {tickers[1]}: <span style='color:#fff'>{weights[1]:.0%}</span>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"<div style='color:#666; font-size:12px; margin-top:10px;'>{tickers[0]}: <b style='color:#fff'>{weights[0]:.0%}</b></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='color:#666; font-size:12px;'>{tickers[1]}: <b style='color:#fff'>{weights[1]:.0%}</b></div>", unsafe_allow_html=True)
 
-# --- DASHBOARD CENTRAL ---
+# --- DASHBOARD ---
 
 if len(tickers) > 0:
     data = get_data_robust(tickers, start_date)
     
-    if not data.empty and len(data.columns) > 0:
+    if not data.empty:
         returns = data.pct_change().dropna()
         
-        # Moteur d'Optimisation
-        if mode == "MARKOWITZ OPTIMIZATION" and len(data.columns) >= 2:
+        # --- LOGIQUE D'ALLOCATION ---
+        # 1. Si Optimisation demandée et assez d'actifs
+        if mode == "Auto-Optimize" and len(data.columns) >= 2:
             weights = optimize(returns)
         
-        # Fallback poids
+        # 2. Si Poids manuel non défini ou incorrect (ex: changement de tickers)
         if len(weights) != len(data.columns):
             weights = [1/len(data.columns)] * len(data.columns)
 
@@ -196,96 +180,81 @@ if len(tickers) > 0:
         port_ret = returns.dot(weights)
         cum_port = (1 + port_ret).cumprod() * 100
         
-        # Stats Fin
+        # Metrics
         total_ret = cum_port.iloc[-1]/100 - 1
         cagr = (total_ret + 1)**(252/len(data)) - 1
         vol = port_ret.std() * np.sqrt(252)
         sharpe = cagr / vol if vol > 0 else 0
 
-        # --- BLOC KPI (GRILLE STRICTE) ---
-        # Pas de colonnes serrées, de l'air.
-        
+        # --- AFFICHAGE KPI (LIGNE ÉPURÉE) ---
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("ANNUAL RETURN (CAGR)", f"{cagr:.2%}")
-        c2.metric("VOLATILITY (RISK)", f"{vol:.2%}")
-        c3.metric("SHARPE RATIO", f"{sharpe:.2f}")
+        c1.metric("CAGR", f"{cagr:.2%}")
+        c2.metric("VOLATILITY", f"{vol:.2%}")
+        c3.metric("SHARPE", f"{sharpe:.2f}")
         c4.metric("TOTAL RETURN", f"{total_ret:.2%}")
         
-        st.markdown("<div style='height: 40px;'></div>", unsafe_allow_html=True) # White space
+        st.markdown("<br>", unsafe_allow_html=True)
 
-        # --- GRAPHIQUE INSTITUTIONNEL ---
-        # Toggle discret
-        col_toggle, _ = st.columns([1, 5])
+        # --- GRAPHIQUE ---
+        col_toggle, _ = st.columns([2, 5])
         with col_toggle:
-            show_base100 = st.toggle("REBASE 100", value=True)
+            view_mode = st.radio("VIEW MODE", ["Base 100 (Comparison)", "Price (Raw)"], horizontal=True, label_visibility="collapsed")
 
         fig = go.Figure()
 
-        # Styles de lignes : Blanc pur pour le portefeuille, Gris pour les actifs
-        if show_base100:
-            # 1. Portefeuille (Blanc pur, ligne franche)
+        if view_mode == "Base 100 (Comparison)":
+            # 1. Portefeuille (Blanc Pur)
             fig.add_trace(go.Scatter(
                 x=cum_port.index, y=cum_port, 
-                name="PORTFOLIO", 
-                mode='lines',
-                line=dict(color='#FFFFFF', width=1.5)
+                name="PORTFOLIO", mode='lines',
+                line=dict(color='#FFFFFF', width=2)
             ))
-            
-            # 2. Benchmark (Gris, ligne fine)
-            colors = ['#444444', '#666666']
+            # 2. Benchmark/Actifs (Gris foncé)
+            colors = ['#444444', '#666666', '#888888']
             for i, col in enumerate(data.columns):
                 cum_asset = (1 + returns[col]).cumprod() * 100
                 fig.add_trace(go.Scatter(
-                    x=cum_asset.index, y=cum_asset, 
-                    name=col,
-                    line=dict(color=colors[i % 2], width=1, dash='solid')
+                    x=cum_asset.index, y=cum_asset, name=col,
+                    line=dict(color=colors[i % len(colors)], width=1, dash='solid')
                 ))
-            title_g = "EQUITY CURVE (BASE 100)"
-        else:
+            y_title = "BASE 100"
+            
+        else: # Mode Prix Réels
             for i, col in enumerate(data.columns):
                 fig.add_trace(go.Scatter(
-                    x=data.index, y=data[col], 
-                    name=col,
-                    mode='lines',
-                    line=dict(color='#FFFFFF' if i==0 else '#666666', width=1)
+                    x=data.index, y=data[col], name=col,
+                    line=dict(width=1.5)
                 ))
-            title_g = "HISTORICAL PRICES"
+            y_title = "PRICE"
 
-        # Layout Graphique "Bloomberg Terminal"
+        # Layout "Chart Graphique" Noir
         fig.update_layout(
-            title=dict(text=title_g.upper(), font=dict(size=12, color='#666666')),
-            paper_bgcolor='#000000', # Fond noir
+            paper_bgcolor='#000000',
             plot_bgcolor='#000000',
-            font=dict(family="Inter, sans-serif", color='#888888', size=10),
-            
-            # Grille très subtile
-            xaxis=dict(showgrid=False, linecolor='#333333', tickfont=dict(color='#666666')),
-            yaxis=dict(showgrid=True, gridcolor='#1a1a1a', gridwidth=1, zeroline=False),
-            
+            font=dict(family="Inter, sans-serif", color='#666666', size=11),
+            xaxis=dict(showgrid=False, linecolor='#333'),
+            yaxis=dict(title=y_title, showgrid=True, gridcolor='#1a1a1a', zeroline=False),
             hovermode="x unified",
-            margin=dict(l=0, r=0, t=30, b=0),
+            margin=dict(l=0, r=0, t=20, b=0),
             height=500,
-            showlegend=False # Légende minimaliste au survol uniquement pour garder pur
+            showlegend=False # Légende cachée pour pureté (visible au survol)
         )
-        
         st.plotly_chart(fig, use_container_width=True)
         
-        # Petit tableau de corrélation sobre en bas
+        # --- MATRICE CORRELATION (Subtile) ---
         if len(data.columns) > 1:
-            st.markdown("<br><p class='caption'>CORRELATION MATRIX</p>", unsafe_allow_html=True)
+            st.markdown("<br><p style='color:#444; font-size:0.8rem; text-transform:uppercase;'>Correlation Matrix</p>", unsafe_allow_html=True)
             corr = returns.corr()
-            # Heatmap en niveaux de gris
-            import plotly.figure_factory as ff
-            fig_corr = px.imshow(corr, text_auto=True, color_continuous_scale=['#000000', '#333333', '#FFFFFF'])
+            import plotly.express as px
+            # Echelle de gris
+            fig_corr = px.imshow(corr, text_auto=True, color_continuous_scale=['#000000', '#222222', '#eeeeee'], zmin=-1, zmax=1)
             fig_corr.update_layout(
-                paper_bgcolor='black', plot_bgcolor='black', 
-                font=dict(color='#666666', size=10),
-                height=250, margin=dict(l=0,r=0,t=0,b=0),
-                coloraxis_showscale=False
+                paper_bgcolor='black', plot_bgcolor='black', font=dict(color='#888'),
+                height=250, margin=dict(l=0,r=0,t=0,b=0), coloraxis_showscale=False
             )
             st.plotly_chart(fig_corr, use_container_width=True)
 
     else:
-        st.markdown("<br><br><h3 style='text-align:center; color:#333;'>NO DATA AVAILABLE. CHECK TICKERS.</h3>", unsafe_allow_html=True)
+        st.warning("No data found. Please check tickers.")
 else:
-    st.markdown("<br><br><h3 style='text-align:center; color:#333;'>AWAITING INPUT...</h3>", unsafe_allow_html=True)
+    st.info("Enter tickers to initialize analytics.")
