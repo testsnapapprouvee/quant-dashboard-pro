@@ -331,32 +331,48 @@ def run_monte_carlo(data, params, runs=100):
     return pd.DataFrame(results)
 
 # ==========================================
-# 4. DATA ENGINE (STRICT YAHOO)
+# 4. DATA ENGINE (VERSION BULLDOZER CORRIGÉE)
 # ==========================================
 @st.cache_data(ttl=3600)
 def get_data(tickers, start, end):
+    """
+    Récupère les données de manière agressive.
+    Si le téléchargement groupé échoue, on passe ticker par ticker.
+    """
     if not tickers: return pd.DataFrame()
-    try:
-        df = yf.download(tickers, start=start, end=end, progress=False, group_by='ticker', auto_adjust=True)
-    except: return pd.DataFrame()
-
-    prices = pd.DataFrame()
-    if len(tickers) >= 2:
-        t_x2, t_x1 = tickers[0], tickers[1]
-        
-        if isinstance(df.columns, pd.MultiIndex):
-            try:
-                if t_x2 in df.columns.levels[0] and t_x1 in df.columns.levels[0]:
-                    prices['X2'] = df[t_x2]['Close']
-                    prices['X1'] = df[t_x1]['Close']
-            except: pass
-        elif len(df.columns) >= 2:
-            try:
-                prices['X2'] = df.iloc[:, 0]
-                prices['X1'] = df.iloc[:, 1]
-            except: pass
     
-    return prices.ffill().dropna()
+    price_map = {}
+    clean_tickers = [t.strip().upper() for t in tickers]
+    
+    # TELECHARGEMENT INDIVIDUEL (ROBUSTE)
+    for t in clean_tickers:
+        try:
+            # On force auto_adjust=True
+            df_temp = yf.download(t, start=start, end=end, progress=False, auto_adjust=True)
+            if df_temp.empty:
+                # Retry sans auto_adjust
+                df_temp = yf.download(t, start=start, end=end, progress=False, auto_adjust=False)
+            
+            if not df_temp.empty:
+                if 'Close' in df_temp.columns:
+                    price_map[t] = df_temp['Close']
+                elif 'Adj Close' in df_temp.columns:
+                    price_map[t] = df_temp['Adj Close']
+                    
+        except Exception as e:
+            continue
+
+    if len(price_map) >= 2:
+        # On suppose que l'ordre d'entrée est respecté : X2 (Risk) puis X1 (Safe)
+        df_final = pd.DataFrame(price_map)
+        
+        # On renomme pour le moteur interne : Colonne 1 -> X2, Colonne 2 -> X1
+        cols = df_final.columns
+        df_final.rename(columns={cols[0]: 'X2', cols[1]: 'X1'}, inplace=True)
+        
+        return df_final.ffill().dropna()
+        
+    return pd.DataFrame()
 
 # ==========================================
 # 5. UI LAYOUT PRINCIPAL
@@ -423,7 +439,16 @@ if 'opt_params' in st.session_state:
 # --- MAIN DISPLAY ---
 with col_main:
     if data.empty or len(data) < 10:
-        st.error(f"❌ **AUCUNE DONNÉE** pour {', '.join(tickers)}. Vérifiez les tickers ou la date.")
+        st.error(f"""
+        ❌ **DONNÉES NON DISPONIBLES**
+        
+        Impossible de récupérer : **{', '.join(tickers)}**.
+        
+        **Conseils :**
+        1. Vérifiez que les tickers existent sur [Yahoo Finance](https://finance.yahoo.com).
+        2. Pour Paris, ajoutez **.PA** (ex: `LQQ.PA`). Pour les USA, rien (ex: `QLD`).
+        3. Vérifiez que la date de début n'est pas fériée.
+        """)
     else:
         # 1. Backtest
         df_res, trades = BacktestEngine.run_simulation(data, params)
