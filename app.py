@@ -6,8 +6,20 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
 
+# --- IMPORT DU MODULE RISK (GESTION D'ERREUR SI FICHIER MANQUANT) ---
+try:
+    from modules.risk_metrics import RiskMetrics
+    RISK_MODULE_AVAILABLE = True
+except ImportError:
+    RISK_MODULE_AVAILABLE = False
+    # Mock class pour éviter le crash si le fichier n'est pas encore créé
+    class RiskMetrics:
+        @staticmethod
+        def get_full_risk_profile(series):
+            return {}
+
 # ==========================================
-# 1. CONFIGURATION & CSS (DESIGN EXACT)
+# 1. CONFIGURATION & CSS (DESIGN SILENT LUXURY)
 # ==========================================
 st.set_page_config(page_title="Predict. Distinct", layout="wide", page_icon="⚡")
 
@@ -335,7 +347,6 @@ def get_data(tickers, start, end):
         # 2. Cas Flat (Parfois Yahoo aplatit tout si un ticker échoue)
         elif len(df.columns) >= 2:
             # On prend les 2 premières colonnes en supposant que ce sont les Clôtures
-            # C'est risqué mais c'est un fallback si Yahoo change son API
             try:
                 prices['X2'] = df.iloc[:, 0]
                 prices['X1'] = df.iloc[:, 1]
@@ -357,7 +368,7 @@ st.markdown("""
     <div style="display:flex; justify-content:space-between; align-items:center;">
         <div>
             <h1 style="margin:0;" class="title-gradient">Predict. DISTINCT PROFILES</h1>
-            <p style="color:#888; margin:5px 0 0 0; font-size:12px;">ENGINE V2.0 • REAL MARKET DATA ONLY</p>
+            <p style="color:#888; margin:5px 0 0 0; font-size:12px;">ENGINE V2.0 • REAL MARKET DATA ONLY • RISK INTELLIGENCE</p>
         </div>
         <div style="text-align:right;">
             <span style="background:rgba(16, 185, 129, 0.1); color:#10b981; padding:5px 10px; border-radius:4px; font-size:11px; border:1px solid rgba(16, 185, 129, 0.2);">LIVE CONNECTED</span>
@@ -417,6 +428,9 @@ if 'opt_params' in st.session_state:
 
 # --- AFFICHAGE PRINCIPAL OU ERREUR ---
 with col_main:
+    if not RISK_MODULE_AVAILABLE:
+        st.warning("⚠️ Module `risk_metrics.py` introuvable. Les métriques avancées (Ulcer, VaR) seront désactivées.")
+
     if data.empty or len(data) < 10:
         # SI PAS DE DONNÉES RÉELLES, ON ARRÊTE TOUT ICI
         st.error(f"""
@@ -437,13 +451,33 @@ with col_main:
         df_res, trades = BacktestEngine.run_simulation(data, params)
         metrics = calculate_metrics(df_res['portfolio'])
         bench_met = calculate_metrics(df_res['benchX2'])
+        
+        # --- NOUVEAU: RISK INTELLIGENCE (FROM MODULE 1) ---
+        if RISK_MODULE_AVAILABLE:
+            risk_strat = RiskMetrics.get_full_risk_profile(df_res['portfolio'])
+            risk_bench = RiskMetrics.get_full_risk_profile(df_res['benchX2'])
+        else:
+            risk_strat = {}
+            risk_bench = {}
+        # --------------------------------------------------
 
+        # KPI ROW 1: Standard
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("CAGR Strat", f"{metrics['CAGR']:.1f}%", delta=f"{metrics['CAGR']-bench_met['CAGR']:.1f}%")
         k2.metric("Max Drawdown", f"{metrics['MaxDD']:.1f}%", delta=f"{metrics['MaxDD']-bench_met['MaxDD']:.1f}%", delta_color="inverse")
         k3.metric("Volatilité", f"{metrics['Vol']:.1f}%")
         k4.metric("Trades", len(trades))
 
+        # KPI ROW 2: Advanced Risk (Institutional)
+        if RISK_MODULE_AVAILABLE:
+            st.markdown("### ⚠️ Institutional Risk Profile")
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("Ulcer Index (Pain)", f"{risk_strat.get('Ulcer_Index', 0):.2f}", delta=f"{risk_strat.get('Ulcer_Index', 0)-risk_bench.get('Ulcer_Index', 0):.2f}", delta_color="inverse", help="Mesure la profondeur et la durée de la douleur")
+            r2.metric("VaR 95% (Daily)", f"{risk_strat.get('VaR_95', 0)*100:.2f}%", delta=f"{(risk_strat.get('VaR_95', 0)-risk_bench.get('VaR_95', 0))*100:.2f}%", delta_color="inverse")
+            r3.metric("CVaR 95% (Tail)", f"{risk_strat.get('CVaR_95', 0)*100:.2f}%", delta=f"{(risk_strat.get('CVaR_95', 0)-risk_bench.get('CVaR_95', 0))*100:.2f}%", delta_color="inverse")
+            r4.metric("Annual Volatility", f"{risk_strat.get('Vol_Ann', 0)*100:.1f}%", delta=f"{(risk_strat.get('Vol_Ann', 0)-risk_bench.get('Vol_Ann', 0))*100:.1f}%", delta_color="inverse")
+        
+        # MAIN CHART
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         fig = go.Figure()
         
