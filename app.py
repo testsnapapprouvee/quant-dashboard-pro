@@ -64,16 +64,9 @@ st.markdown("""
     .title-text { font-weight: 800; font-size: 32px; letter-spacing: -1px; color: #FFFFFF; }
     .title-dot { color: #A855F7; font-size: 32px; font-weight: 800; }
     
-    /* METRICS TABLE */
-    table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: 'Inter'; }
-    th { text-align: left; color: #aaa; background-color: #1E1E2E; padding: 10px; border-bottom: 1px solid #333; }
-    tr:nth-child(even) { background-color: #1E1E2E; }
-    tr:nth-child(odd) { background-color: #2A2A3E; }
-    td { padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.05); color: #E0E0E0; }
-    
     /* TABS */
     .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #333; gap: 25px; }
-    .stTabs [data-baseweb="tab"] { background: transparent; color: #888; border: none; font-weight: 500; padding-bottom: 10px; }
+    .stTabs [data-baseweb="tab"] { background: transparent; color: #888; border: none; font-weight: 500; }
     .stTabs [aria-selected="true"] { color: #A855F7 !important; border-bottom: 2px solid #A855F7 !important; font-weight: 600; }
     
     /* CARDS */
@@ -84,7 +77,7 @@ st.markdown("""
         margin-bottom: 20px; backdrop-filter: blur(10px);
     }
     
-    /* WIDGETS */
+    /* UTILS */
     .stButton > button { width: 100%; border-radius: 6px; font-weight: 600; background-color: #1E1E2E; color: #A855F7; border: 1px solid #A855F7; transition: all 0.3s; }
     .stButton > button:hover { background-color: #A855F7; color: white; border: 1px solid #A855F7; }
     
@@ -94,7 +87,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. MOTEUR VECTORISÉ
+# 1. MOTEUR VECTORISÉ (RAPIDE)
 # ==========================================
 class BacktestEngine:
     @staticmethod
@@ -113,11 +106,11 @@ class BacktestEngine:
         alloc_prud = params['allocPrudence'] / 100.0
         cost_rate = params.get('cost', 0.001)
 
-        # Indicateurs
+        # 1. Indicateurs
         roll_max = data['X2'].rolling(w, min_periods=1).max().values
         dd = (px_x2 / roll_max) - 1.0
         
-        # Boucle Régime
+        # 2. Boucle Régime
         n = len(data)
         regimes = np.zeros(n, dtype=int) 
         
@@ -155,16 +148,14 @@ class BacktestEngine:
             
             regimes[i] = curr_reg
 
-        # Allocation
+        # 3. Allocation
         alloc_x1 = np.where(regimes == 2, alloc_crash, np.where(regimes == 1, alloc_prud, 0.0))
         alloc_x1 = np.roll(alloc_x1, 1); alloc_x1[0] = 0.0
         alloc_x2 = 1.0 - alloc_x1
         
         ret_x2 = np.zeros_like(px_x2); ret_x1 = np.zeros_like(px_x1)
-        # Protection division par zero
         valid_x2 = (px_x2[:-1] != 0)
         ret_x2[1:][valid_x2] = (px_x2[1:][valid_x2] / px_x2[:-1][valid_x2]) - 1
-        
         valid_x1 = (px_x1[:-1] != 0)
         ret_x1[1:][valid_x1] = (px_x1[1:][valid_x1] / px_x1[:-1][valid_x1]) - 1
         
@@ -227,18 +218,40 @@ class AnalyticsEngine:
 
 class SmartOptimizer:
     @staticmethod
-    def run(data, profile, current_params):
+    def run(data, objective_mode, current_params):
         n_iter = 40
         best_score, best_p = -np.inf, current_params.copy()
+        
+        # Espace de recherche
         for _ in range(n_iter):
-            t = np.random.uniform(2.0, 10.0)
-            p = np.random.uniform(t + 5.0, 35.0)
-            r = np.random.choice([20, 30, 40, 50])
-            test_p = current_params.copy(); test_p.update({'thresh': t, 'panic': p, 'recovery': r})
+            t = np.random.uniform(2.0, 12.0)
+            p = np.random.uniform(t + 5.0, 40.0) # Panic toujours > Threshold
+            r = np.random.choice([20, 30, 40, 50, 60])
+            
+            test_p = current_params.copy()
+            test_p.update({'thresh': t, 'panic': p, 'recovery': r})
+            
+            # Simulation
             res, _ = BacktestEngine.run_simulation(data, test_p)
             met = AnalyticsEngine.calculate_metrics(res['portfolio'])
-            score = met['Calmar'] if profile == "DEFENSIVE" else (met['Sharpe'] if profile == "BALANCED" else met['CAGR'])
-            if score > best_score: best_score, best_p = score, test_p
+            
+            # --- FONCTION OBJECTIF EXPLICITE ---
+            score = 0
+            if objective_mode == "Max Performance (CAGR)":
+                # On maximise le rendement, mais on pénalise si DD extreme (>50%)
+                score = met['CAGR'] if met['MaxDD'] > -50 else -1000
+                
+            elif objective_mode == "Min Drawdown (Calmar)":
+                # On maximise le ratio Calmar (Rendement / Drawdown Max)
+                score = met['Calmar']
+                
+            elif objective_mode == "Max Sharpe (Risk-Adj)":
+                # On maximise le Sharpe
+                score = met['Sharpe']
+            
+            if score > best_score:
+                best_score, best_p = score, test_p
+                
         return best_p, best_score
 
 # ==========================================
@@ -311,8 +324,11 @@ with col_sidebar:
         
     st.markdown("---")
     st.markdown("### ⚡ PARAMS")
+    
+    # Session State des Params
     if 'p' not in st.session_state: st.session_state['p'] = {'thresh': 5.0, 'panic': 15, 'recovery': 30, 'allocPrudence': 50, 'allocCrash': 100, 'rollingWindow': 60, 'confirm': 2}
     pp = st.session_state['p']
+    
     thresh = st.slider("Threshold (%)", 2.0, 10.0, float(pp['thresh']), 0.5)
     panic = st.slider("Panic (%)", 10, 40, int(pp['panic']), 1)
     recov = st.slider("Recovery (%)", 10, 60, int(pp['recovery']), 5)
@@ -323,14 +339,26 @@ with col_sidebar:
         confirm = st.slider("Confirm (Jours)", 1, 5, int(pp['confirm']))
         cost = st.number_input("Frais (%)", 0.0, 1.0, 0.1) / 100
 
-    if st.button("RUN AUTO-TUNE"):
+    st.markdown("---")
+    st.markdown("### 🧠 AUTO TUNE")
+    
+    # Choix Explicite de l'objectif
+    obj_mode = st.selectbox("Cible d'Optimisation", 
+                            ["Min Drawdown (Calmar)", "Max Rendement (CAGR)", "Max Sharpe (Risk-Adj)"])
+    
+    if st.button("LANCER L'OPTIMISATION"):
         d_opt = get_data(tickers, start_d, end_d)
         if not d_opt.empty:
-            with st.spinner("Optimizing..."):
+            with st.spinner(f"Recherche optimale pour : {obj_mode}..."):
+                # Paramètres actuels comme base
                 curr = {'thresh': thresh, 'panic': panic, 'recovery': recov, 'allocPrudence': a_prud, 'allocCrash': a_crash, 'rollingWindow': 60, 'confirm': confirm, 'cost': cost}
-                best, score = SmartOptimizer.run(d_opt, "Calmar", curr)
+                
+                # Run
+                best, score = SmartOptimizer.run(d_opt, obj_mode, curr)
+                
+                # Update
                 st.session_state['p'] = best
-                st.success(f"Score: {score:.2f}")
+                st.success(f"Optimisé ! Score: {score:.2f}")
                 st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -341,8 +369,11 @@ with col_main:
     if data.empty or len(data) < 10:
         st.error("❌ NO DATA.")
     else:
+        # Simulation principale
         sim_p = {'thresh': thresh, 'panic': panic, 'recovery': recov, 'allocPrudence': a_prud, 'allocCrash': a_crash, 'rollingWindow': 60, 'confirm': confirm, 'cost': cost}
         df_res, trades = BacktestEngine.run_simulation(data, sim_p)
+        
+        # Metrics
         m_strat = AnalyticsEngine.calculate_metrics(df_res['portfolio'])
         m_bench = AnalyticsEngine.calculate_metrics(df_res['benchX2'])
         
@@ -356,6 +387,7 @@ with col_main:
         
         # --- TAB 1: DASHBOARD ---
         with t1:
+            # KPI
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("CAGR", f"{m_strat['CAGR']:.1f}%", delta=f"{m_strat['CAGR']-m_bench['CAGR']:.1f}%")
             k2.metric("Max Drawdown", f"{m_strat['MaxDD']:.1f}%", delta=f"{m_strat['MaxDD']-m_bench['MaxDD']:.1f}%", delta_color="inverse")
@@ -364,44 +396,48 @@ with col_main:
             
             st.markdown('<div class="glass-card">', unsafe_allow_html=True)
             
-            # SUBPLOTS : Performance + Allocation
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
+            # DUAL CHART (Prix + Allocations)
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
             
-            # Perf
+            # 1. Courbes Prix
             fig.add_trace(go.Scatter(x=df_res.index, y=df_res['portfolio'], name='STRATÉGIE', 
                                      line=dict(color='#A855F7', width=2)), row=1, col=1)
             fig.add_trace(go.Scatter(x=df_res.index, y=df_res['benchX2'], name='Risk (X2)', 
                                      line=dict(color='#ef4444', width=1, dash='dot')), row=1, col=1)
             
-            # Markers
+            # Markers Trades
             for t in trades:
                 c = '#ef4444' if 'CRASH' in t['label'] else ('#f59e0b' if 'PRUDENCE' in t['label'] else '#10b981')
                 fig.add_annotation(x=t['date'], y=df_res.loc[t['date']]['portfolio'], text="▼" if t['to']!=0 else "▲", 
                                    showarrow=False, font=dict(color=c, size=14), row=1, col=1)
 
-            # Allocation
-            fig.add_trace(go.Scatter(x=df_res.index, y=df_res['weight_x2']*100, name='Alloc X2',
+            # 2. Zones d'Allocation
+            fig.add_trace(go.Scatter(x=df_res.index, y=df_res['weight_x2']*100, name='Alloc X2 (Risk)',
                                      stackgroup='one', line=dict(width=0), fillcolor='rgba(239, 68, 68, 0.3)'), row=2, col=1)
-            fig.add_trace(go.Scatter(x=df_res.index, y=df_res['weight_x1']*100, name='Alloc X1',
+            fig.add_trace(go.Scatter(x=df_res.index, y=df_res['weight_x1']*100, name='Alloc X1 (Safe)',
                                      stackgroup='one', line=dict(width=0), fillcolor='rgba(16, 185, 129, 0.3)'), row=2, col=1)
 
-            fig.update_layout(paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', font=dict(family="Inter", color='#E0E0E0'), 
-                              height=550, margin=dict(l=40, r=40, t=20, b=40), 
-                              xaxis2=dict(showgrid=False), yaxis=dict(gridcolor='rgba(255,255,255,0.05)'),
-                              yaxis2=dict(range=[0, 100], title="Alloc %"), hovermode="x unified", showlegend=False)
+            fig.update_layout(
+                paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', 
+                font=dict(family="Inter", color='#E0E0E0'), height=550, 
+                margin=dict(l=40, r=40, t=20, b=40), 
+                xaxis2=dict(showgrid=False), yaxis=dict(gridcolor='rgba(255,255,255,0.05)'),
+                yaxis2=dict(range=[0, 100], title="Alloc %"),
+                hovermode="x unified", showlegend=False
+            )
             st.plotly_chart(fig, use_container_width=True)
             
             # Légende
             st.markdown("""
             <div style="display:flex; justify-content:center; gap:20px; font-size:12px; color:#888;">
-                <span style="color:#10b981">▲ Buy Risk</span>
-                <span style="color:#ef4444">▼ Panic Sell (X1)</span>
+                <span style="color:#10b981">▲ Achat Offensif</span>
+                <span style="color:#ef4444">▼ Vente Panique (X1)</span>
                 <span style="color:#f59e0b">▼ Prudence</span>
             </div>
             """, unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # --- TAB 2: PERFORMANCE ---
+        # --- TAB 2: PERFORMANCE DETAILED ---
         with t2:
             st.markdown("### 🏆 Tableau de Bord")
             p_data = {
@@ -435,9 +471,8 @@ with col_main:
         # --- TAB 4: SIGNALS ---
         with t4:
             if not arb_sig.empty:
-                st.markdown("### 🎯 Arbitrage Z-Score")
                 curr_z = arb_sig['Z_Score'].iloc[-1]
-                st.metric("Current Z-Score", f"{curr_z:.2f}", delta="Rich" if curr_z>0 else "Cheap", delta_color="inverse")
+                st.metric("Z-Score", f"{curr_z:.2f}", delta="Rich" if curr_z>0 else "Cheap", delta_color="inverse")
                 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
                 fig_z = go.Figure()
                 fig_z.add_trace(go.Scatter(x=arb_sig.index, y=arb_sig['Z_Score'], line=dict(color='#3b82f6', width=2)))
@@ -451,14 +486,12 @@ with col_main:
         # --- TAB 5: FORECAST (MONTE CARLO) ---
         with t5:
             st.markdown("### 🔮 Prévisions de Marché (Fan Chart)")
-            st.caption("Projection probabiliste du portefeuille sur les 252 prochains jours (1 an).")
+            st.caption("Projection probabiliste du portefeuille sur 252 jours (1 an).")
             
             if st.button("Générer les Scénarios (200 Simulations)"):
                 with st.spinner("Calcul des trajectoires futures..."):
-                    # Simulation
                     paths = AnalyticsEngine.monte_carlo_forecast(df_res['portfolio'], n_sims=200, horizon=252)
                     
-                    # Stats
                     final_prices = paths[-1, :]
                     median_price = np.median(final_prices)
                     p95 = np.percentile(final_prices, 95)
@@ -470,7 +503,6 @@ with col_main:
                     c2.metric("Optimiste (95%)", f"{p95:.0f}", delta=f"{(p95/start_price-1)*100:.1f}%")
                     c3.metric("Pessimiste (5%)", f"{p05:.0f}", delta=f"{(p05/start_price-1)*100:.1f}%", delta_color="inverse")
                     
-                    # Fan Chart
                     fig_mc = go.Figure()
                     x_axis = np.arange(252)
                     y_p95 = np.percentile(paths, 95, axis=1)
@@ -482,10 +514,5 @@ with col_main:
                     fig_mc.add_trace(go.Scatter(x=x_axis, y=y_median, mode='lines', name='Trajectoire Médiane', line=dict(color='#A855F7', width=3)))
                     fig_mc.add_hline(y=start_price, line_dash="dot", line_color="white", annotation_text="Prix Actuel")
 
-                    fig_mc.update_layout(
-                        paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', 
-                        font=dict(family="Inter", color='#E0E0E0'), 
-                        height=450, title="Projection Future (Cône d'Incertitude)",
-                        xaxis_title="Jours Ouvrés (Futur)", yaxis_title="Valeur Portefeuille"
-                    )
+                    fig_mc.update_layout(paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', font=dict(family="Inter", color='#E0E0E0'), height=450, title="Projection Future (Cône d'Incertitude)", xaxis_title="Jours Ouvrés", yaxis_title="Valeur")
                     st.plotly_chart(fig_mc, use_container_width=True)
