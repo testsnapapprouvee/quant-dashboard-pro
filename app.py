@@ -7,145 +7,222 @@ import plotly.express as px
 from scipy.optimize import minimize
 from datetime import datetime, timedelta
 
-# --- 1. CONFIGURATION VISUELLE (DARK MODE PRO) ---
-st.set_page_config(page_title="Quant Dashboard", layout="wide", page_icon="⚡")
+# --- 1. CONFIGURATION DESIGN (NOIR & VIOLET) ---
+st.set_page_config(page_title="Predict", layout="wide", page_icon="🔮")
 
-# Injection CSS pour le look "Hedge Fund"
+# Injection CSS : Noir Profond & Accents Violets (#8b5cf6)
 st.markdown("""
 <style>
-    .stApp { background-color: #0e1117; color: #ffffff; }
+    /* Fond principal noir */
+    .stApp { background-color: #050505; color: #e0e0e0; }
+    
+    /* Titres et textes */
+    h1, h2, h3 { color: #ffffff !important; font-family: 'Helvetica Neue', sans-serif; }
+    
+    /* Métriques (Cartes) */
     div[data-testid="stMetric"] {
-        background-color: #1f2937; border: 1px solid #374151;
-        padding: 15px; border-radius: 8px;
+        background-color: #121212;
+        border: 1px solid #333;
+        border-left: 5px solid #8b5cf6; /* Bordure violette */
+        border-radius: 8px;
+        padding: 10px;
     }
-    div[data-testid="stMetricLabel"] { color: #9ca3af; font-size: 0.8rem; }
-    div[data-testid="stMetricValue"] { color: #f3f4f6; font-size: 1.8rem; font-weight: 700; }
+    div[data-testid="stMetricLabel"] { color: #a0a0a0; }
+    div[data-testid="stMetricValue"] { color: #c4b5fd; text-shadow: 0 0 10px rgba(139, 92, 246, 0.3); }
+
+    /* Inputs et Sidebar */
+    section[data-testid="stSidebar"] { background-color: #0a0a0a; border-right: 1px solid #222; }
+    .stTextInput > div > div > input { background-color: #1a1a1a; color: white; border-color: #8b5cf6; }
+    
+    /* Boutons et Sliders */
+    div.stSlider > div[data-baseweb="slider"] > div > div { background-color: #8b5cf6 !important; }
+    button[kind="secondary"] { border-color: #8b5cf6; color: #8b5cf6; }
+    button[kind="primary"] { background-color: #8b5cf6; border: none; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. MOTEUR QUANTITATIF ---
+# --- 2. FONCTIONS (MOTEUR) ---
 
 @st.cache_data(ttl=3600)
-def get_data(tickers, start_date):
+def get_data_robust(tickers, start_date):
+    """Télécharge les données et gère les erreurs silencieusement"""
     try:
-        df = yf.download(tickers, start=start_date, progress=False)['Adj Close']
-        if isinstance(df, pd.Series): df = df.to_frame()
-        return df.dropna()
-    except: return pd.DataFrame()
+        df = yf.download(tickers, start=start_date, progress=False, group_by='ticker', auto_adjust=True)
+        prices = pd.DataFrame()
 
-def get_kpis(returns, risk_free=0.0):
-    # Performance Cumulée
-    cum = (1 + returns).cumprod()
-    total_ret = cum.iloc[-1] - 1
-    
-    # CAGR & Volatilité
-    n_years = len(returns) / 252
-    cagr = (total_ret + 1)**(1/n_years) - 1 if n_years > 0 else 0
-    vol = returns.std() * np.sqrt(252)
-    
-    # Sharpe & Sortino
-    sharpe = (cagr - risk_free) / vol if vol > 0 else 0
-    neg_ret = returns[returns < 0]
-    down_vol = neg_ret.std() * np.sqrt(252)
-    sortino = (cagr - risk_free) / down_vol if down_vol > 0 else 0
-    
-    # Drawdown
-    running_max = cum.cummax()
-    dd = (cum / running_max) - 1
-    max_dd = dd.min()
-    
-    return {"CAGR": cagr, "Vol": vol, "Sharpe": sharpe, "Sortino": sortino, "MaxDD": max_dd}
+        # Gestion format Yahoo (MultiIndex vs Single Index)
+        if len(tickers) == 1:
+            t = tickers[0]
+            if 'Close' in df.columns: prices[t] = df['Close']
+            elif t in df.columns: prices[t] = df[t]['Close']
+        else:
+            for t in tickers:
+                if t in df.columns: prices[t] = df[t]['Close']
+                
+        prices = prices.fillna(method='ffill').dropna()
+        return prices
+    except Exception:
+        return pd.DataFrame()
 
-def optimize_portfolio(returns):
+def optimize(returns):
+    """Optimisation Max Sharpe"""
     n = len(returns.columns)
     def neg_sharpe(w):
-        ret = np.sum(returns.mean() * w) * 252
-        vol = np.sqrt(np.dot(w.T, np.dot(returns.cov() * 252, w)))
-        return -ret/vol if vol > 0 else 0
+        r = np.sum(returns.mean()*w)*252
+        v = np.sqrt(np.dot(w.T, np.dot(returns.cov()*252, w)))
+        return -r/v if v > 0 else 0
     
-    constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-    bounds = tuple((0, 1) for _ in range(n))
-    res = minimize(neg_sharpe, [1/n]*n, bounds=bounds, constraints=constraints)
+    cons = ({'type':'eq', 'fun': lambda x: np.sum(x)-1})
+    bnds = tuple((0,1) for _ in range(n))
+    res = minimize(neg_sharpe, [1/n]*n, bounds=bnds, constraints=cons)
     return res.x
 
-# --- 3. DASHBOARD ---
+# --- 3. INTERFACE PREDICT ---
 
-st.title("⚡ QUANT DASHBOARD : Arbitrage & Levier")
-st.markdown("Analyse temps réel : **Spot vs Levier** (Optimisation Markowitz)")
+st.title("PREDICT 🔮")
+st.caption("Plateforme d'Analyse Quantitative & Arbitrage")
 
-# Sidebar
+# --- SIDEBAR ---
 with st.sidebar:
     st.header("Paramètres")
-    tickers = st.text_input("Tickers (Yahoo Finance)", "PUST.PA, LQQ.PA").upper().split(',')
-    tickers = [t.strip() for t in tickers]
+    
+    # Champ de recherche avec validation visuelle
+    default_tickers = "PUST.PA, LQQ.PA"
+    tickers_input = st.text_input("Tickers (Yahoo)", default_tickers, help="Ex: PUST.PA, LQQ.PA ou QQQ, QLD")
+    tickers = [t.strip().upper() for t in tickers_input.split(',')]
+    
+    # Période
     years = st.slider("Historique (Années)", 1, 10, 3)
+    start_date = datetime.now() - timedelta(days=years*365)
     
     st.divider()
-    mode = st.radio("Stratégie", ["Manuel", "Optimisation IA (Max Sharpe)"])
     
+    # Stratégie
+    mode = st.radio("Mode Allocation", ["Manuel", "Optimisation AI"])
     weights = []
+    
     if mode == "Manuel":
         w = st.slider(f"Poids {tickers[0]}", 0, 100, 50)
         weights = [w/100, 1-(w/100)]
-        st.write(f"Allocation : {weights[0]:.0%} / {weights[1]:.0%}")
+        st.write(f"🟣 {tickers[0]}: **{weights[0]:.0%}**")
+        st.write(f"⚪ {tickers[1]}: **{weights[1]:.0%}**")
 
-# Main Calculation
-start = datetime.now() - timedelta(days=years*365)
-data = get_data(tickers, start)
+# --- MAIN LOGIC ---
+
+# 1. Chargement
+data = get_data_robust(tickers, start_date)
 
 if not data.empty and len(data.columns) > 1:
+    # Petit indicateur de succès
+    st.sidebar.success(f"✅ Données chargées : {len(data)} jours")
+    
     returns = data.pct_change().dropna()
     
-    if mode == "Optimisation IA (Max Sharpe)":
-        with st.spinner("Optimisation en cours..."):
-            weights = optimize_portfolio(returns)
-        st.sidebar.success(f"Optimisé : {weights[0]:.1%} / {weights[1]:.1%}")
+    # 2. Optimisation (si activée)
+    if mode == "Optimisation AI":
+        with st.spinner("🔮 L'IA calcule l'allocation optimale..."):
+            weights = optimize(returns)
+        st.sidebar.markdown(f"**Optimisé :**")
+        st.sidebar.info(f"{tickers[0]}: {weights[0]:.1%} | {tickers[1]}: {weights[1]:.1%}")
     
-    # Calculs finaux
-    port_ret = returns.dot(weights)
-    bench_ret = returns.iloc[:, 1] # Benchmark = 2ème ticker (LQQ)
-    
-    stats_p = get_kpis(port_ret)
-    stats_b = get_kpis(bench_ret)
-    
-    # --- VISUALISATION ---
-    
-    # 1. KPIs
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("CAGR", f"{stats_p['CAGR']:.2%}", f"{stats_p['CAGR']-stats_b['CAGR']:.2%} vs Bench")
-    c2.metric("Sharpe", f"{stats_p['Sharpe']:.2f}", f"{stats_p['Sharpe']-stats_b['Sharpe']:.2f}")
-    c3.metric("Volatilité", f"{stats_p['Vol']:.2%}", f"{stats_p['Vol']-stats_b['Vol']:.2%}", delta_color="inverse")
-    c4.metric("Max Drawdown", f"{stats_p['MaxDD']:.2%}", f"{stats_p['MaxDD']-stats_b['MaxDD']:.2%}", delta_color="inverse")
+    # Sécurité taille poids
+    if len(weights) != len(data.columns):
+        weights = [1/len(data.columns)] * len(data.columns)
 
-    # 2. Graphiques
-    tab1, tab2 = st.tabs(["📈 Performance & Drawdown", "🔗 Corrélations"])
+    # 3. Calculs Portefeuille
+    port_returns = returns.dot(weights)
     
-    with tab1:
-        # Equity Curve
-        cum_p = (1 + port_ret).cumprod() * 100
-        cum_b = (1 + bench_ret).cumprod() * 100
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=cum_b.index, y=cum_b, name="Benchmark", line=dict(color='gray', dash='dot')))
-        fig.add_trace(go.Scatter(x=cum_p.index, y=cum_p, name="Mon Portefeuille", fill='tozeroy', line=dict(color='#00d2ff', width=2)))
-        fig.update_layout(title="Performance Base 100", template="plotly_dark", height=450)
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Drawdown
-        rmax = cum_p.cummax()
-        dd = (cum_p / rmax) - 1
-        fig_dd = px.area(dd, title="Drawdown (Profondeur des pertes)", color_discrete_sequence=['#ef4444'])
-        fig_dd.update_layout(template="plotly_dark", height=300)
-        st.plotly_chart(fig_dd, use_container_width=True)
+    # Création des séries de prix cumulés (Base 100) pour calculs KPIs
+    cum_port = (1 + port_returns).cumprod() * 100
+    cum_bench = (1 + returns.iloc[:, 1]).cumprod() * 100 # Benchmark = 2ème ticker
 
-    with tab2:
-        # Corrélation Roulante
-        roll_corr = returns.iloc[:,0].rolling(30).corr(returns.iloc[:,1])
-        fig_corr = px.line(roll_corr, title="Corrélation Glissante (30 jours)")
-        fig_corr.update_traces(line_color='#f59e0b')
-        fig_corr.update_layout(template="plotly_dark", yaxis_range=[-1, 1])
-        st.plotly_chart(fig_corr, use_container_width=True)
-        st.info("Si la corrélation baisse, c'est le moment idéal pour l'arbitrage.")
+    # KPIs
+    total_ret = cum_port.iloc[-1]/100 - 1
+    cagr = (total_ret + 1)**(252/len(data)) - 1
+    vol = port_returns.std() * np.sqrt(252)
+    sharpe = cagr / vol if vol > 0 else 0
+    
+    # --- DASHBOARD ---
+    
+    # Ligne des KPIs
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("CAGR", f"{cagr:.2%}")
+    k2.metric("Sharpe Ratio", f"{sharpe:.2f}")
+    k3.metric("Volatilité", f"{vol:.2%}")
+    k4.metric("Perf Totale", f"{total_ret:.2%}")
+
+    st.divider()
+
+    # --- SECTION GRAPHIQUE AVANCÉE ---
+    
+    # Option d'affichage : Base 100 ou Prix Réels
+    col_opt, _ = st.columns([1, 4])
+    with col_opt:
+        show_base100 = st.toggle("Voir en Base 100", value=True)
+
+    fig = go.Figure()
+
+    if show_base100:
+        # MODE BASE 100 : On voit TOUT (ETFs + Portefeuille)
+        # 1. Le Portefeuille (Violet brillant + Remplissage)
+        fig.add_trace(go.Scatter(
+            x=cum_port.index, y=cum_port, 
+            name="PREDICT PORTFOLIO", 
+            mode='lines',
+            line=dict(color='#8b5cf6', width=3),
+            fill='tozeroy', 
+            fillcolor='rgba(139, 92, 246, 0.1)' 
+        ))
+        
+        # 2. Les ETFs individuels (Lignes fines ou pointillées)
+        colors = ['#a0a0a0', '#4b5563'] # Gris clair, Gris foncé
+        for i, col in enumerate(data.columns):
+            cum_asset = (1 + returns[col]).cumprod() * 100
+            fig.add_trace(go.Scatter(
+                x=cum_asset.index, y=cum_asset, 
+                name=f"{col} (Base 100)",
+                line=dict(color=colors[i % 2], width=1, dash='dot')
+            ))
+            
+        title_graph = "Performance Comparée (Base 100)"
+        y_title = "Valeur (Base 100)"
+        
+    else:
+        # MODE PRIX RÉELS : On ne voit QUE les ETFs (Pas de portefeuille)
+        # On utilise deux axes Y si les prix sont très différents
+        for i, col in enumerate(data.columns):
+            fig.add_trace(go.Scatter(
+                x=data.index, y=data[col], 
+                name=f"Prix {col}",
+                mode='lines',
+                line=dict(width=2)
+            ))
+            
+        title_graph = "Historique des Prix Réels (Pas de Portefeuille simulé)"
+        y_title = "Prix (€/$)"
+
+    # Mise en page Graphique style "Dark FinTech"
+    fig.update_layout(
+        title=title_graph,
+        paper_bgcolor='rgba(0,0,0,0)', 
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e0e0e0'),
+        yaxis=dict(title=y_title, gridcolor='#333'),
+        xaxis=dict(gridcolor='#333'),
+        hovermode="x unified",
+        legend=dict(orientation="h", y=1.02, yanchor="bottom", x=0, xanchor="left"),
+        height=500
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # --- PARTIE ANALYSE CORRÉLATION ---
+    with st.expander("📊 Matrice de Corrélation"):
+        corr = returns.corr()
+        fig_corr = px.imshow(corr, text_auto=True, color_continuous_scale='Purples', zmin=-1, zmax=1)
+        fig_corr.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+        st.plotly_chart(fig_corr)
 
 else:
-    st.error("Erreur de données. Vérifiez les tickers ou attendez quelques secondes.")
+    st.error("❌ Ticker introuvable ou données vides.")
+    st.info("Essayez avec 'QQQ, QLD' pour tester si 'PUST.PA' bloque.")
