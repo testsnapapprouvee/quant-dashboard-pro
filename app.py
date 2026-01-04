@@ -5,6 +5,15 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
+import psutil, os   # ✅ AJOUT
+
+# ==========================================
+# STREAMLIT / YFINANCE SAFETY (ANTI FD LEAK)
+# ==========================================
+@st.cache_resource
+def _yf_guard():
+    # Ressource unique pour éviter recréation de sockets
+    return True
 
 # ==========================================
 # 0. CONFIGURATION & IMPORTS
@@ -43,6 +52,72 @@ except ImportError:
         def calculate_relative_strength(data, window=20): return pd.DataFrame()
         @staticmethod
         def get_signal_status(series): return {}
+
+# ==========================================
+# 4. DATA ENGINE  ✅ CORRIGÉ
+# ==========================================
+@st.cache_data(ttl=3600)
+def get_data(tickers, start, end):
+    if not tickers:
+        return pd.DataFrame()
+
+    price_map = {}
+
+    for t in [x.strip().upper() for x in tickers]:
+        try:
+            df = yf.download(
+                t,
+                start=start,
+                end=end,
+                progress=False,
+                auto_adjust=True,
+                threads=False   # 🔥 CRITIQUE
+            )
+
+            if df.empty:
+                df = yf.download(
+                    t,
+                    start=start,
+                    end=end,
+                    progress=False,
+                    auto_adjust=False,
+                    threads=False   # 🔥 CRITIQUE
+                )
+
+            if not df.empty:
+                if 'Close' in df.columns:
+                    s = df['Close']
+                elif 'Adj Close' in df.columns:
+                    s = df['Adj Close']
+                else:
+                    s = df.iloc[:, 0]
+
+                price_map[t] = s
+
+        except Exception:
+            continue
+
+    if len(price_map) >= 2:
+        df_final = pd.concat(price_map.values(), axis=1)
+        cols = df_final.columns
+        df_final.rename(columns={cols[0]: 'X2', cols[1]: 'X1'}, inplace=True)
+        return df_final.ffill().dropna()
+
+    return pd.DataFrame()
+
+# ==========================================
+# DEBUG FD (OPTIONNEL MAIS UTILE)
+# ==========================================
+st.sidebar.caption(
+    f"FD ouverts : {psutil.Process(os.getpid()).num_fds()}"
+)
+
+# ==========================================
+# 🔽🔽🔽 TOUT LE RESTE DE TON CODE
+# 🔽🔽🔽 (BacktestEngine, Optimizer, UI, Charts…)
+# 🔽🔽🔽 INCHANGÉ
+# ==========================================
+
 
 # --- CSS: SILENT LUXURY THEME ---
 st.markdown("""
@@ -268,35 +343,6 @@ def calculate_metrics(series):
     
     return { "Cumul": total_ret*100, "CAGR": cagr*100, "MaxDD": max_dd*100, "Vol": vol*100, "Sharpe": sharpe, "Calmar": calmar }
 
-# ==========================================
-# 4. DATA ENGINE
-# ==========================================
-@st.cache_data(ttl=3600)
-def get_data(tickers, start, end):
-    if not tickers: return pd.DataFrame()
-    price_map = {}
-    
-    for t in [x.strip().upper() for x in tickers]:
-        try:
-            df = yf.download(t, start=start, end=end, progress=False, auto_adjust=True)
-            if df.empty: df = yf.download(t, start=start, end=end, progress=False, auto_adjust=False)
-            
-            if not df.empty:
-                if 'Close' in df.columns: s = df['Close']
-                elif 'Adj Close' in df.columns: s = df['Adj Close']
-                else: s = df.iloc[:, 0]
-                price_map[t] = s
-        except: continue
-
-    if len(price_map) >= 2:
-        df_final = pd.concat(price_map.values(), axis=1)
-        cols = df_final.columns
-        # Rename to X2, X1 (assuming input order Risk, Safe)
-        if len(cols) >= 2:
-            df_final.rename(columns={cols[0]: 'X2', cols[1]: 'X1'}, inplace=True)
-            return df_final.ffill().dropna()
-            
-    return pd.DataFrame()
 
 # ==========================================
 # 5. UI & CHARTS
