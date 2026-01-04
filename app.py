@@ -15,12 +15,13 @@ st.set_page_config(page_title="Predict.", layout="wide", page_icon="⚡")
 MODULES_STATUS = {"Risk": False, "Leverage": False, "Arbitrage": False}
 
 try:
-    from modules.risk_metrics import RiskMetrics
-    MODULES_STATUS["Risk"] = True
+    from modules.risk_metrics import RiskMetrics
+    MODULES_STATUS["Risk"] = True
 except ImportError:
-    class RiskMetrics:
-        @staticmethod
-        def get_full_risk_profile(series): return {}
+    class RiskMetrics:
+        @staticmethod
+        def get_full_risk_profile(series):
+            return {}
 
 try:
     from modules.leverage_diagnostics import LeverageDiagnostics
