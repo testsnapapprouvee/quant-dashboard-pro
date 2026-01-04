@@ -62,12 +62,3 @@ else:
     st.write("### Metrics")
     metrics_df = pd.DataFrame(metrics, index=["Total Return", "CAGR", "Max Drawdown"]).T
     st.table(metrics_df)
-
-    # --- Plotly Interactive Chart ---
-    st.write("### Interactive Chart")
-    fig = go.Figure()
-    for col in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=perf[col], mode='lines', name=col))
-    fig.update_layout(height=500, width=900, xaxis_title="Date", yaxis_title="Normalized Price",
-                      paper_bgcolor="#0A0A0F", plot_bgcolor="#0A0A0F", font=dict(color="#E0E0E0"))
-    st.plotly_chart(fig, use_container_width=True)
