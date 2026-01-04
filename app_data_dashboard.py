@@ -1,73 +1,57 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Mini Dashboard", layout="wide")
+# ===============================
+# 1. SIDEBAR - Sélection ETF
+# ===============================
+st.sidebar.header("Sélection des actifs")
+tickers = st.sidebar.text_input("Tickers (séparés par virgule)", "LQQ.PA, PUST.PA")
+tickers = [t.strip().upper() for t in tickers.split(",")]
 
-st.title("📊 Mini Dashboard ETF")
+period_options = ["1Y", "6M", "3M", "Custom"]
+sel_period = st.sidebar.selectbox("Période", period_options, index=1)
 
-# --- Sidebar: Inputs ---
-tickers_input = st.text_input("Tickers (Risk, Safe)", "LQQ.PA, PUST.PA")
-tickers = [t.strip().upper() for t in tickers_input.split(",")]
+today = datetime.today()
+if sel_period == "1Y":
+    start_d = today - timedelta(days=365)
+elif sel_period == "6M":
+    start_d = today - timedelta(days=182)
+elif sel_period == "3M":
+    start_d = today - timedelta(days=90)
+else:
+    start_d = st.sidebar.date_input("Start date", today - timedelta(days=365))
+end_d = today
 
-start_date = st.date_input("Start Date", datetime.now() - timedelta(days=180))
-end_date = st.date_input("End Date", datetime.now())
-
-# --- Data Load ---
+# ===============================
+# 2. DATA
+# ===============================
 @st.cache_data(ttl=3600)
-def load_data(tickers, start, end):
+def get_data(tickers, start, end):
     price_map = {}
     for t in tickers:
         try:
             df = yf.download(t, start=start, end=end, progress=False, auto_adjust=True)
-            if df.empty:
-                df = yf.download(t, start=start, end=end, progress=False)
             if not df.empty:
                 price_map[t] = df['Close']
         except:
             continue
-    if len(price_map) >= 2:
+    if price_map:
         df_final = pd.concat(price_map.values(), axis=1)
-        df_final.columns = ["Risk", "Safe"]
-        df_final = df_final.ffill().dropna()
-        return df_final
+        df_final.columns = price_map.keys()
+        return df_final.ffill().dropna()
     return pd.DataFrame()
 
-df = load_data(tickers, start_date, end_date)
+data = get_data(tickers, start_d, end_d)
 
-if df.empty:
-    st.error("❌ No data found. Check tickers or date range.")
+if data.empty:
+    st.error("Pas de données pour ces tickers/date.")
 else:
-    st.write("### Raw Prices")
-    st.line_chart(df)
+    st.subheader("📈 Performance des actifs")
+    # Normaliser à 100 pour comparer
+    df_norm = (data / data.iloc[0]) * 100
+    st.line_chart(df_norm)
 
-    # --- Performance Normalized ---
-    perf = df / df.iloc[0] * 100
-    st.write("### Normalized Performance (Base 100)")
-    st.line_chart(perf)
-
-    # --- Metrics ---
-    def calc_metrics(series):
-        total_ret = (series.iloc[-1] / series.iloc[0]) - 1
-        days = len(series)
-        cagr = ((series.iloc[-1] / series.iloc[0]) ** (252/days) - 1) if days > 1 else 0
-        drawdown = (series / series.cummax() - 1).min()
-        return total_ret, cagr, drawdown
-
-    metrics = {col: calc_metrics(df[col]) for col in df.columns}
-
-    st.write("### Metrics")
-    metrics_df = pd.DataFrame(metrics, index=["Total Return", "CAGR", "Max Drawdown"]).T
-    st.table(metrics_df)
-
-    # --- Plotly Interactive Chart ---
-    st.write("### Interactive Chart")
-    fig = go.Figure()
-    for col in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=perf[col], mode='lines', name=col))
-    fig.update_layout(height=500, width=900, xaxis_title="Date", yaxis_title="Normalized Price",
-                      paper_bgcolor="#0A0A0F", plot_bgcolor="#0A0A0F", font=dict(color="#E0E0E0"))
-    st.plotly_chart(fig, use_container_width=True)
+    st.subheader("📊 Données brutes")
+    st.dataframe(df_norm.tail(10))
