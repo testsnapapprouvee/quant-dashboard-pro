@@ -169,67 +169,32 @@ st.markdown("""
 # ==========================================
 
 @st.cache_data(ttl=3600)
-
 def get_data(tickers, start, end):
 
-    """Télécharge les NAVs Yahoo et les nettoie"""
-
-    if not tickers or len(tickers) < 2:
-
+    if len(tickers) != 2:
         return pd.DataFrame()
 
-    
+    df = yf.download(
+        tickers,
+        start=start,
+        end=end,
+        progress=False,
+        auto_adjust=True
+    )
 
-    series_list = []
+    if df.empty:
+        return pd.DataFrame()
 
-    ticker_names = []
+    # Cas multi-index
+    if isinstance(df.columns, pd.MultiIndex):
+        prices = df['Close']
+    else:
+        prices = df[['Close']]
 
-    
+    prices = prices.dropna().ffill()
 
-    for ticker in tickers[:2]:  # On prend les 2 premiers
-
-        try:
-
-            df = yf.download(ticker, start=start, end=end, progress=False)
-
-            if not df.empty:
-
-                # Prendre la colonne Close (ou Adj Close si dispo)
-
-                if 'Close' in df.columns:
-
-                    series_list.append(df['Close'])
-
-                elif 'Adj Close' in df.columns:
-
-                    series_list.append(df['Adj Close'])
-
-                else:
-
-                    series_list.append(df.iloc[:, 0])
-
-                ticker_names.append(ticker)
-
-        except:
-
-            continue
-
-    
-
-    if len(series_list) == 2:
-
-        result = pd.concat(series_list, axis=1, keys=ticker_names)
-
-        result.columns = ['X2', 'X1']  # X2 = Risk, X1 = Safe
-
-        result = result.ffill().dropna()
-
-        return result
-
-    
-
-    return pd.DataFrame()
-
+    prices.columns = ['X2', 'X1']  # Risk, Safe
+    return prices
 
 
 # ==========================================
