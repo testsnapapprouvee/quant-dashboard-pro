@@ -5,3 +5,4 @@ numpy
 scipy
 plotly
 matplotlib
+pip install requests-cache
