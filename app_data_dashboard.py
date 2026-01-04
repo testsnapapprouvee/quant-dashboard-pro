@@ -1,140 +1,73 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
-# ======================================
-# CONFIG
-# ======================================
-st.set_page_config(
-    page_title="Mini Data Dashboard",
-    layout="wide"
-)
+st.set_page_config(page_title="Mini Dashboard", layout="wide")
 
-st.title("📊 Mini ETF Data Dashboard")
-st.caption("Étape 1 — Validation des données Yahoo")
+st.title("📊 Mini Dashboard ETF")
 
-# ======================================
-# SIDEBAR
-# ======================================
-with st.sidebar:
-    st.header("Assets")
+# --- Sidebar: Inputs ---
+tickers_input = st.text_input("Tickers (Risk, Safe)", "LQQ.PA, PUST.PA")
+tickers = [t.strip().upper() for t in tickers_input.split(",")]
 
-    risk = st.text_input("Risk ETF", "LQQ.PA")
-    safe = st.text_input("Safe ETF", "PUST.PA")
+start_date = st.date_input("Start Date", datetime.now() - timedelta(days=180))
+end_date = st.date_input("End Date", datetime.now())
 
-    st.header("Period")
-    period = st.selectbox(
-        "Lookback",
-        ["6M", "1Y", "3Y", "5Y", "Custom"],
-        index=1
-    )
+# --- Data Load ---
+@st.cache_data(ttl=3600)
+def load_data(tickers, start, end):
+    price_map = {}
+    for t in tickers:
+        try:
+            df = yf.download(t, start=start, end=end, progress=False, auto_adjust=True)
+            if df.empty:
+                df = yf.download(t, start=start, end=end, progress=False)
+            if not df.empty:
+                price_map[t] = df['Close']
+        except:
+            continue
+    if len(price_map) >= 2:
+        df_final = pd.concat(price_map.values(), axis=1)
+        df_final.columns = ["Risk", "Safe"]
+        df_final = df_final.ffill().dropna()
+        return df_final
+    return pd.DataFrame()
 
-    today = datetime.today()
+df = load_data(tickers, start_date, end_date)
 
-    if period == "6M":
-        start = today - timedelta(days=180)
-    elif period == "1Y":
-        start = today - timedelta(days=365)
-    elif period == "3Y":
-        start = today - timedelta(days=365 * 3)
-    elif period == "5Y":
-        start = today - timedelta(days=365 * 5)
-    else:
-        start = st.date_input("Start", today - timedelta(days=365))
-        end = st.date_input("End", today)
+if df.empty:
+    st.error("❌ No data found. Check tickers or date range.")
+else:
+    st.write("### Raw Prices")
+    st.line_chart(df)
 
-    if period != "Custom":
-        end = today
-
-    run = st.button("LOAD DATA")
-
-# ======================================
-# DATA LOADER (NO CACHE ON PURPOSE)
-# ======================================
-def load_prices(ticker, start, end):
-    df = yf.download(
-        ticker,
-        start=start,
-        end=end,
-        progress=False,
-        auto_adjust=False
-    )
-
-    if df.empty:
-        return pd.Series(dtype=float)
-
-    return df["Close"].dropna()
-
-# ======================================
-# MAIN
-# ======================================
-if run:
-    with st.spinner("Downloading data from Yahoo Finance..."):
-        px_risk = load_prices(risk, start, end)
-        px_safe = load_prices(safe, start, end)
-
-    if px_risk.empty or px_safe.empty:
-        st.error("❌ One or both tickers returned no data.")
-        st.stop()
-
-    # Align dates
-    df = pd.concat([px_risk, px_safe], axis=1)
-    df.columns = ["Risk", "Safe"]
-    df = df.dropna()
-
-    # Base 100 performance
+    # --- Performance Normalized ---
     perf = df / df.iloc[0] * 100
+    st.write("### Normalized Performance (Base 100)")
+    st.line_chart(perf)
 
-    # ==================================
-    # METRICS
-    # ==================================
-    c1, c2 = st.columns(2)
+    # --- Metrics ---
+    def calc_metrics(series):
+        total_ret = (series.iloc[-1] / series.iloc[0]) - 1
+        days = len(series)
+        cagr = ((series.iloc[-1] / series.iloc[0]) ** (252/days) - 1) if days > 1 else 0
+        drawdown = (series / series.cummax() - 1).min()
+        return total_ret, cagr, drawdown
 
-    with c1:
-        st.metric(
-            f"{risk} Total Return",
-            f"{(perf['Risk'].iloc[-1] - 100):.1f}%"
-        )
+    metrics = {col: calc_metrics(df[col]) for col in df.columns}
 
-    with c2:
-        st.metric(
-            f"{safe} Total Return",
-            f"{(perf['Safe'].iloc[-1] - 100):.1f}%"
-        )
+    st.write("### Metrics")
+    metrics_df = pd.DataFrame(metrics, index=["Total Return", "CAGR", "Max Drawdown"]).T
+    st.table(metrics_df)
 
-    # ==================================
-    # CHART
-    # ==================================
+    # --- Plotly Interactive Chart ---
+    st.write("### Interactive Chart")
     fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=perf.index,
-        y=perf["Risk"],
-        name=risk,
-        line=dict(width=2)
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=perf.index,
-        y=perf["Safe"],
-        name=safe,
-        line=dict(width=2)
-    ))
-
-    fig.update_layout(
-        title="Performance (Base 100)",
-        yaxis_title="Index (100 = start)",
-        xaxis_title="Date",
-        hovermode="x unified",
-        height=500
-    )
-
+    for col in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=perf[col], mode='lines', name=col))
+    fig.update_layout(height=500, width=900, xaxis_title="Date", yaxis_title="Normalized Price",
+                      paper_bgcolor="#0A0A0F", plot_bgcolor="#0A0A0F", font=dict(color="#E0E0E0"))
     st.plotly_chart(fig, use_container_width=True)
-
-    # ==================================
-    # RAW DATA CHECK
-    # ==================================
-    with st.expander("🔍 Raw Prices (Debug)"):
-        st.dataframe(df.tail(10))
