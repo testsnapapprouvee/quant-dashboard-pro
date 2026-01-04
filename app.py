@@ -169,6 +169,7 @@ st.markdown("""
 # ==========================================
 
 @st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
 def get_data(tickers, start, end):
 
     if len(tickers) != 2:
@@ -185,16 +186,22 @@ def get_data(tickers, start, end):
     if df.empty:
         return pd.DataFrame()
 
-    # Cas multi-index
+    # --- EXTRACTION SAFE DES CLOSE ---
     if isinstance(df.columns, pd.MultiIndex):
-        prices = df['Close']
+        prices = df['Close'][tickers]
     else:
         prices = df[['Close']]
 
     prices = prices.dropna().ffill()
 
-    prices.columns = ['X2', 'X1']  # Risk, Safe
+    # --- MAPPING EXPLICITE ---
+    prices = prices.rename(columns={
+        tickers[0]: 'X2',  # Risk
+        tickers[1]: 'X1'   # Safe
+    })
+
     return prices
+
 
 
 # ==========================================
@@ -226,6 +233,8 @@ class BacktestEngine:
         dates = data.index
 
         n = len(data)
+        
+        assert not data['X1'].equals(data['X2']), "❌ X1 et X2 sont identiques (data error)"
 
         
 
