@@ -102,191 +102,103 @@ st.markdown("""
 class BacktestEngine:
     @staticmethod
     def run_simulation(data, params):
-        cash_x2, cash_x1, portfolio = 100.0, 0.0, 100.0
-        current_regime, pending_regime, confirm_count = 'R0', 'R0', 0
-        price_history_x2 = []
-        peak_at_crash, trough_x2 = 0.0, 0.0
-        results, trades = [], []
-        dates = data.index
-        # Conversion en numpy pour vitesse max
-        px_x2 = data['X2'].values
-        px_x1 = data['X1'].values
+        if data.empty or len(data) < 2:
+            return pd.DataFrame(), []
 
-        # Params
-        rolling_w = int(params['rollingWindow'])
-        thresh, panic, recov = params['thresh'], params['panic'], params['recovery']
-        confirm = params['confirm']
-        w = int(params['rollingWindow'])
-        thresh = -params['thresh'] / 100.0
-        panic = -params['panic'] / 100.0
-        recov_factor = params['recovery'] / 100.0
-        confirm = int(params['confirm'])
-        alloc_crash = params['allocCrash'] / 100.0
-        alloc_prudence = params['allocPrudence'] / 100.0
+        # --- Paramètres ---
+        rolling_w = int(params.get('rollingWindow', 60))
+        thresh = -params.get('thresh', 5.0) / 100.0
+        panic = -params.get('panic', 15.0) / 100.0
+        recov_factor = params.get('recovery', 30.0) / 100.0
+        confirm = int(params.get('confirm', 2))
+        alloc_prud = params.get('allocPrudence', 50.0) / 100.0
+        alloc_crash = params.get('allocCrash', 100.0) / 100.0
         tx_cost = params.get('cost', 0.001)
-        alloc_prud = params['allocPrudence'] / 100.0
-        cost_rate = params.get('cost', 0.001)
 
         dates = data.index
         px_x2, px_x1 = data['X2'].values, data['X1'].values
-        # 1. Indicateurs
-        # Rolling Max (Pandas gère mieux les fenêtres glissantes que numpy pur ici)
-        roll_max = data['X2'].rolling(w, min_periods=1).max().values
-        dd = np.zeros_like(px_x2)
-        # Éviter division par zéro
-        mask = roll_max != 0
-        dd[mask] = (px_x2[mask] / roll_max[mask]) - 1.0
-
-        for i in range(len(data)):
-            # 1. Update Portfolio
-            if i > 0:
-                r_x2 = (px_x2[i] - px_x2[i-1]) / px_x2[i-1] if px_x2[i-1] != 0 else 0
-                r_x1 = (px_x1[i] - px_x1[i-1]) / px_x1[i-1] if px_x1[i-1] != 0 else 0
-                cash_x2 *= (1 + r_x2)
-                cash_x1 *= (1 + r_x1)
-                portfolio = cash_x2 + cash_x1
-            
-            # 2. Indicators
-            curr_price = px_x2[i]
-            price_history_x2.append(curr_price)
-            if len(price_history_x2) > rolling_w: price_history_x2.pop(0)
-            
-            rolling_peak = max(price_history_x2)
-            if rolling_peak == 0: rolling_peak = 1
-            current_dd = ((curr_price - rolling_peak) / rolling_peak) * 100
-        # 2. Boucle Régime (Nécessaire pour l'hystérésis/mémoire)
         n = len(data)
-        regimes = np.zeros(n, dtype=int) 
-        
-        curr_reg = 0
-        peak = px_x2[0]
-        trough = px_x2[0]
-        pending = 0
-        conf_count = 0
-        
-        for i in range(1, n):
-            price = px_x2[i]
-            cur_dd = dd[i]
-            target = curr_reg
 
-            # 3. Regime Logic
-            target = current_regime
-            if current_regime != 'R2':
-                if current_dd <= -panic: target = 'R2'
-                elif current_dd <= -thresh: target = 'R1'
-                else: target = 'R0'
-            # Logique de bascule
-            if curr_reg != 2: 
+        # --- Rendements corrects ---
+        ret_x2 = np.zeros_like(px_x2, dtype=float)
+        ret_x1 = np.zeros_like(px_x1, dtype=float)
+
+        ret_x2[1:] = np.diff(px_x2) / px_x2[:-1]
+        ret_x1[1:] = np.diff(px_x1) / px_x1[:-1]
+
+        # --- Drawdown ---
+        roll_max = np.maximum.accumulate(px_x2)
+        dd = (px_x2 / roll_max) - 1
+
+        # --- Allocation et régimes ---
+        regimes = np.zeros(n, dtype=int)
+        current_regime, pending_regime, conf_count = 0, 0, 0
+        peak, trough = px_x2[0], px_x2[0]
+
+        for i in range(1, n):
+            cur_dd = dd[i]
+            price = px_x2[i]
+
+            target = 0
+            if current_regime != 2:
                 if cur_dd <= panic: target = 2
                 elif cur_dd <= thresh: target = 1
-                else: target = 0
 
-            if current_regime in ['R1', 'R2']:
-                if curr_price < trough_x2: trough_x2 = curr_price
-                recovery_target = trough_x2 + (peak_at_crash - trough_x2) * (recov / 100.0)
-                if curr_price >= recovery_target: target = 'R0'
-            # Logique de Recovery
-            if curr_reg in [1, 2]:
-                if price < trough: trough = price
+            if current_regime in [1, 2]:
+                trough = min(trough, price)
                 recov_price = trough + (peak - trough) * recov_factor
-                if price >= recov_price: target = 0
-                else:
-                    if current_dd <= -panic: target = 'R2'
-                    elif current_dd <= -thresh and current_regime != 'R2': target = 'R1'
-                    if cur_dd <= panic: target = 2
-                    elif cur_dd <= thresh and curr_reg != 2: target = 1
+                if price >= recov_price:
+                    target = 0
+
+            # Confirmation logic
+            if target == pending_regime:
+                conf_count += 1
             else:
-                peak_at_crash, trough_x2 = rolling_peak, curr_price
+                pending_regime = target
+                conf_count = 1
 
-            # 4. Execution
-            if target == pending_regime: confirm_count += 1
-            else: pending_regime = target; confirm_count = 0
-                
-            if confirm_count >= confirm and pending_regime != current_regime:
-                old_regime, current_regime = current_regime, pending_regime
-                
-                target_pct_x1, label = 0.0, ""
-                if current_regime == 'R2': target_pct_x1, label = alloc_crash, "CRASH"
-                elif current_regime == 'R1': target_pct_x1, label = alloc_prudence, "PRUDENCE"
-                else: target_pct_x1, label = 0.0, "OFFENSIF"
-                
-                total_val = cash_x1 + cash_x2
-                cost_impact = total_val * tx_cost
-                total_val -= cost_impact
-                
-                cash_x1 = total_val * target_pct_x1
-                cash_x2 = total_val * (1 - target_pct_x1)
-                
-                if current_regime != 'R0': peak_at_crash, trough_x2 = rolling_peak, curr_price
-                
-                trades.append({'date': dates[i], 'from': old_regime, 'to': current_regime, 'label': label, 'val': total_val, 'cost': cost_impact})
-                confirm_count = 0
-                peak = roll_max[i]
+            if conf_count >= confirm and pending_regime != current_regime:
+                current_regime = pending_regime
+                peak = max(px_x2[max(0, i-rolling_w):i+1])
                 trough = price
-
-            results.append({'date': dates[i], 'portfolio': portfolio, 'X1': px_x1[i], 'X2': px_x2[i], 'regime': current_regime})
-            # Confirmation
-            if target == pending: conf_count += 1
-            else: pending = target; conf_count = 0
-
-        df_res = pd.DataFrame(results).set_index('date')
-        if not df_res.empty:
-            df_res['portfolio'] = (df_res['portfolio'] / df_res['portfolio'].iloc[0]) * 100
-            df_res['benchX1'] = (df_res['X1'] / df_res['X1'].iloc[0]) * 100
-            df_res['benchX2'] = (df_res['X2'] / df_res['X2'].iloc[0]) * 100
-            if conf_count >= confirm and pending != curr_reg:
-                curr_reg = pending
                 conf_count = 0
-                if curr_reg != 0: peak = roll_max[i]; trough = price
 
-            regimes[i] = curr_reg
+            regimes[i] = current_regime
 
-        # 3. Allocation Vectorisée
-        # 0=Offensif (100% X2), 1=Prudence, 2=Crash
+        # --- Poids ---
         alloc_x1 = np.where(regimes == 2, alloc_crash, np.where(regimes == 1, alloc_prud, 0.0))
-        
-        # Shift (Lag) : La décision prise en T s'applique au rendement de T+1
-        alloc_x1 = np.roll(alloc_x1, 1); alloc_x1[0] = 0.0
+        alloc_x1 = np.roll(alloc_x1, 1)  # décision T s'applique à T+1
+        alloc_x1[0] = 0.0
         alloc_x2 = 1.0 - alloc_x1
-        
-        # Rendements
-        ret_x2 = np.zeros_like(px_x2); ret_x1 = np.zeros_like(px_x1)
-        valid_x2 = (px_x2[:-1] != 0)
-        ret_x2[1:][valid_x2] = (px_x2[1:][valid_x2] / px_x2[:-1][valid_x2]) - 1
-        valid_x1 = (px_x1[:-1] != 0)
-        ret_x1[1:][valid_x1] = (px_x1[1:][valid_x1] / px_x1[:-1][valid_x1]) - 1
-        
-        # Coûts
+
+        # --- Coûts ---
         delta_alloc = np.abs(np.diff(alloc_x1, prepend=0))
-        costs = delta_alloc * cost_rate
-        
-        # Stratégie
-        strat_ret = (alloc_x2 * ret_x2) + (alloc_x1 * ret_x1) - costs
+        costs = delta_alloc * tx_cost
+
+        # --- Performance ---
+        strat_ret = alloc_x2 * ret_x2 + alloc_x1 * ret_x1 - costs
         curve_strat = 100 * np.cumprod(1 + strat_ret)
         curve_x2 = 100 * np.cumprod(1 + ret_x2)
         curve_x1 = 100 * np.cumprod(1 + ret_x1)
-        
-        # DATAFRAME FINAL (AVEC LES POIDS !)
+
+        # --- Résultat final ---
         df_res = pd.DataFrame({
             'portfolio': curve_strat,
             'benchX2': curve_x2,
             'benchX1': curve_x1,
             'regime': regimes,
-            'weight_x2': alloc_x2, # <--- C'EST ICI QUE ÇA MANQUAIT
-            'weight_x1': alloc_x1, # <--- ET ICI
+            'weight_x2': alloc_x2,
+            'weight_x1': alloc_x1,
             'drawdown': dd
         }, index=dates)
-        
-        # Extraction Trades
+
+        # --- Trades pour markers ---
         trades = []
-        # On détecte les changements d'allocation non nuls
         regime_changes = np.where(np.diff(regimes) != 0)[0] + 1
         labels = {0: "OFFENSIF", 1: "PRUDENCE", 2: "CRASH"}
-        
         for idx in regime_changes:
-            if idx < len(dates):
-                trades.append({'date': dates[idx], 'to': regimes[idx], 'label': labels.get(regimes[idx], "UNK")})
-                
+            trades.append({'date': dates[idx], 'to': regimes[idx], 'label': labels.get(regimes[idx], "UNK")})
+
         return df_res, trades
 
 # ==========================================
