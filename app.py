@@ -6,22 +6,37 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 from datetime import datetime, timedelta
-import requests
+import gc
 
 # ==========================================
-# 0. CONFIGURATION & SESSION GUARD
+# 0. SYSTEM HARDENING (ANTI CRASH)
 # ==========================================
+import resource
+try:
+    # Tente d'augmenter la limite de fichiers ouverts du système (Linux/Mac)
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+except Exception:
+    pass
+
+# Import du Cache pour éviter les appels réseaux infinis
+try:
+    import requests_cache
+    # Crée une session qui stocke les réponses dans un fichier 'yfinance_cache.sqlite'
+    session = requests_cache.CachedSession('yfinance_cache', expire_after=3600)
+except ImportError:
+    # Fallback si l'utilisateur n'a pas installé la lib, mais moins robuste
+    import requests
+    session = requests.Session()
+
+# Headers pour éviter le blocage Yahoo
+session.headers['User-agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+
 st.set_page_config(page_title="Predict. Institutional", layout="wide", page_icon="⚡")
 
-# --- FIX "TOO MANY OPEN FILES" ---
-# On crée une session persistante pour réutiliser les connexions TCP
-@st.cache_resource
-def get_session():
-    session = requests.Session()
-    session.headers['User-agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    return session
-
-# --- MODULE IMPORT WITH FALLBACK ---
+# ==========================================
+# 1. MODULES (Mocks pour éviter les erreurs d'import)
+# ==========================================
 MODULES_STATUS = {"Risk": False, "Leverage": False, "Arbitrage": False}
 
 try:
@@ -54,7 +69,9 @@ except ImportError:
         @staticmethod
         def get_signal_status(series): return {}
 
-# --- CSS: SILENT LUXURY THEME ---
+# ==========================================
+# 2. CSS & DESIGN
+# ==========================================
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -62,7 +79,6 @@ st.markdown("""
     .stApp { background-color: #0A0A0F; font-family: 'Inter', sans-serif; color: #E0E0E0; }
     h1, h2, h3, h4, p, div, span, label { color: #E0E0E0; }
     
-    /* HEADER */
     .header-container {
         background: linear-gradient(135deg, #1E1E2E 0%, #2A2A3E 100%);
         border-radius: 12px; padding: 25px; 
@@ -73,12 +89,10 @@ st.markdown("""
     .title-text { font-weight: 800; font-size: 32px; letter-spacing: -1px; color: #FFFFFF; }
     .title-dot { color: #A855F7; font-size: 32px; font-weight: 800; }
     
-    /* TABS */
     .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #333; gap: 25px; }
     .stTabs [data-baseweb="tab"] { background: transparent; color: #888; border: none; font-weight: 500; }
     .stTabs [aria-selected="true"] { color: #A855F7 !important; border-bottom: 2px solid #A855F7 !important; font-weight: 600; }
     
-    /* CARDS */
     .glass-card { 
         background: rgba(30, 30, 46, 0.6); 
         border-radius: 12px; padding: 20px; 
@@ -86,7 +100,6 @@ st.markdown("""
         margin-bottom: 20px; backdrop-filter: blur(10px);
     }
     
-    /* UTILS */
     .stButton > button { width: 100%; border-radius: 6px; font-weight: 600; background-color: #1E1E2E; color: #A855F7; border: 1px solid #A855F7; transition: all 0.3s; }
     .stButton > button:hover { background-color: #A855F7; color: white; border: 1px solid #A855F7; }
     
@@ -96,17 +109,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. MOTEUR VECTORISÉ (CORRIGÉ & RAPIDE)
+# 3. MOTEUR VECTORISÉ (RAPIDE)
 # ==========================================
 class BacktestEngine:
     @staticmethod
     def run_simulation(data, params):
         dates = data.index
-        # Conversion en numpy pour vitesse max
+        # Numpy arrays pour performance
         px_x2 = data['X2'].values
         px_x1 = data['X1'].values
         
-        # Params
         w = int(params['rollingWindow'])
         thresh = -params['thresh'] / 100.0
         panic = -params['panic'] / 100.0
@@ -116,15 +128,13 @@ class BacktestEngine:
         alloc_prud = params['allocPrudence'] / 100.0
         cost_rate = params.get('cost', 0.001)
 
-        # 1. Indicateurs
-        # Rolling Max (Pandas gère mieux les fenêtres glissantes que numpy pur ici)
+        # Indicateurs
         roll_max = data['X2'].rolling(w, min_periods=1).max().values
         dd = np.zeros_like(px_x2)
-        
         mask = roll_max != 0
         dd[mask] = (px_x2[mask] / roll_max[mask]) - 1.0
         
-        # 2. Boucle Régime (Logique Hystérésis)
+        # Logique Régime
         n = len(data)
         regimes = np.zeros(n, dtype=int) 
         
@@ -165,43 +175,35 @@ class BacktestEngine:
             
             regimes[i] = curr_reg
 
-        # 3. Allocation Vectorisée
-        # 0=Offensif (100% X2), 1=Prudence, 2=Crash
+        # Allocation
         alloc_x1 = np.where(regimes == 2, alloc_crash, np.where(regimes == 1, alloc_prud, 0.0))
-        
-        # Shift (Lag) : La décision prise en T s'applique au rendement de T+1
         alloc_x1 = np.roll(alloc_x1, 1); alloc_x1[0] = 0.0
         alloc_x2 = 1.0 - alloc_x1
         
-        # Rendements
         ret_x2 = np.zeros_like(px_x2); ret_x1 = np.zeros_like(px_x1)
         valid_x2 = (px_x2[:-1] != 0)
         ret_x2[1:][valid_x2] = (px_x2[1:][valid_x2] / px_x2[:-1][valid_x2]) - 1
         valid_x1 = (px_x1[:-1] != 0)
         ret_x1[1:][valid_x1] = (px_x1[1:][valid_x1] / px_x1[:-1][valid_x1]) - 1
         
-        # Coûts
         delta_alloc = np.abs(np.diff(alloc_x1, prepend=0))
         costs = delta_alloc * cost_rate
         
-        # Stratégie
         strat_ret = (alloc_x2 * ret_x2) + (alloc_x1 * ret_x1) - costs
         curve_strat = 100 * np.cumprod(1 + strat_ret)
         curve_x2 = 100 * np.cumprod(1 + ret_x2)
         curve_x1 = 100 * np.cumprod(1 + ret_x1)
         
-        # DATAFRAME FINAL (AVEC LES POIDS)
         df_res = pd.DataFrame({
             'portfolio': curve_strat,
             'benchX2': curve_x2,
             'benchX1': curve_x1,
             'regime': regimes,
-            'weight_x2': alloc_x2, # Poids pour le graphique d'allocation
+            'weight_x2': alloc_x2,
             'weight_x1': alloc_x1,
             'drawdown': dd
         }, index=dates)
         
-        # Extraction Trades
         trades = []
         regime_changes = np.where(np.diff(regimes) != 0)[0] + 1
         labels = {0: "OFFENSIF", 1: "PRUDENCE", 2: "CRASH"}
@@ -213,7 +215,7 @@ class BacktestEngine:
         return df_res, trades
 
 # ==========================================
-# 2. ANALYTICS & MONTE CARLO
+# 4. ANALYTICS & OPTIMIZER
 # ==========================================
 class AnalyticsEngine:
     @staticmethod
@@ -244,14 +246,13 @@ class AnalyticsEngine:
 class SmartOptimizer:
     @staticmethod
     def run(data, objective_mode, current_params):
-        n_iter = 40
+        n_iter = 30 # Réduit pour éviter la surcharge lors des tests
         best_score, best_p = -np.inf, current_params.copy()
         
         for _ in range(n_iter):
             t = np.random.uniform(2.0, 12.0)
             p = np.random.uniform(t + 5.0, 40.0)
             r = np.random.choice([20, 30, 40, 50, 60])
-            
             test_p = current_params.copy()
             test_p.update({'thresh': t, 'panic': p, 'recovery': r})
             
@@ -272,62 +273,54 @@ class SmartOptimizer:
         return best_p, best_score
 
 # ==========================================
-# 3. DATA ENGINE (OPTIMISÉ SESSION)
+# 5. DATA FETCHING (CACHE ACTIVÉ)
 # ==========================================
 @st.cache_data(ttl=3600)
 def get_data(tickers, start, end):
+    """
+    Récupère les données avec requests_cache pour éviter l'erreur 'Too many open files'.
+    """
     if not tickers: return pd.DataFrame()
     price_map = {}
     clean = [t.strip().upper() for t in tickers]
     
-    # Session Requests partagée
-    s = get_session()
-    
-    # 1. Tentative de téléchargement groupé
+    # 1. Tentative Bulk
     try:
         tickers_str = " ".join(clean)
-        df = yf.download(tickers_str, start=start, end=end, progress=False, auto_adjust=True, session=s, threads=True)
-        
+        # On passe la session CACHÉE ici
+        df = yf.download(tickers_str, start=start, end=end, progress=False, auto_adjust=True, session=session)
         if df.empty:
-             df = yf.download(tickers_str, start=start, end=end, progress=False, auto_adjust=False, session=s, threads=True)
+             df = yf.download(tickers_str, start=start, end=end, progress=False, auto_adjust=False, session=session)
     except:
         df = pd.DataFrame()
 
-    # 2. Parsing du résultat
-    # Si 1 seul ticker
+    # 2. Parsing
     if len(clean) == 1:
         t = clean[0]
         if not df.empty:
             if 'Close' in df.columns: price_map[t] = df['Close']
             elif 'Adj Close' in df.columns: price_map[t] = df['Adj Close']
             else: price_map[t] = df.iloc[:, 0]
-            
-    # Si plusieurs tickers (MultiIndex)
     else:
         for t in clean:
             try:
-                # Structure: Colonne -> Ticker
+                # Gestion MultiIndex complexe de yfinance
                 if isinstance(df.columns, pd.MultiIndex):
-                    # Essayer d'accéder au niveau Ticker
-                    try:
-                        # Cas classique : Close -> Ticker
-                        if 'Close' in df.columns: price_map[t] = df['Close'][t]
-                        elif 'Adj Close' in df.columns: price_map[t] = df['Adj Close'][t]
-                    except:
-                        # Cas inverse : Ticker -> Close
-                        if t in df.columns: price_map[t] = df[t]['Close']
+                    # Essai 1: df['Close']['AAPL']
+                    if 'Close' in df.columns.get_level_values(0) and t in df['Close'].columns:
+                        price_map[t] = df['Close'][t]
+                    # Essai 2: df['AAPL']['Close']
+                    elif t in df.columns.get_level_values(0):
+                        price_map[t] = df[t]['Close']
                 else:
-                    # Flat columns
                     if t in df.columns: price_map[t] = df[t]
             except: continue
 
     # Assemblage
     if len(price_map) >= 2:
         df_final = pd.concat(price_map.values(), axis=1)
-        # On renomme selon l'ordre d'entrée
-        df_final.columns = clean[:len(df_final.columns)]
+        df_final.columns = clean[:len(df_final.columns)] # Force rename based on input order
         
-        # Mapping X2 / X1
         final_cols = {}
         if len(clean) >= 2:
             final_cols[clean[0]] = 'X2'
@@ -335,15 +328,16 @@ def get_data(tickers, start, end):
             df_final.rename(columns=final_cols, inplace=True)
             
             if 'X2' in df_final.columns and 'X1' in df_final.columns:
+                # Nettoyage mémoire
+                gc.collect()
                 return df_final.ffill().dropna()
                 
     return pd.DataFrame()
 
 # ==========================================
-# 4. INTERFACE UTILISATEUR
+# 6. LAYOUT UI
 # ==========================================
 
-# HEADER
 st.markdown("""
 <div class="header-container">
     <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -360,7 +354,7 @@ st.markdown("""
 
 col_sidebar, col_main = st.columns([1, 3])
 
-# SIDEBAR
+# --- SIDEBAR ---
 with col_sidebar:
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
     st.markdown("### 🏛️ ASSETS")
@@ -373,19 +367,24 @@ with col_sidebar:
         tickers = presets[preset]
         st.caption(f"Risk: **{tickers[0]}** | Safe: **{tickers[1]}**")
     
-    per = st.selectbox("Period", ["YTD", "1Y", "3YR", "5YR", "2022", "Custom"], index=2)
+    per = st.selectbox("Period", ["YTD", "1Y", "3YR", "5YR", "2022", "2008", "Custom"], index=2)
     today = datetime.now()
     if per == "YTD": start_d = datetime(today.year, 1, 1)
     elif per == "1Y": start_d = today - timedelta(days=365)
     elif per == "3YR": start_d = today - timedelta(days=365*3)
     elif per == "5YR": start_d = today - timedelta(days=365*5)
     elif per == "2022": start_d = datetime(2022,1,1); end_d = datetime(2022,12,31)
-    if per == "Custom": start_d = st.date_input("Start", datetime(2020,1,1)); end_d = st.date_input("End", today)
-    elif per != "2022": end_d = today
+    elif per == "2008": start_d = datetime(2008,1,1); end_d = datetime(2008,12,31)
+    else: start_d = datetime(2022,1,1)
+    
+    if per == "Custom": 
+        start_d = st.date_input("Start", datetime(2022,1,1))
+        end_d = st.date_input("End", today)
+    elif per not in ["2022", "2008"]: 
+        end_d = today
         
     st.markdown("---")
     st.markdown("### ⚡ PARAMS")
-    
     if 'p' not in st.session_state: st.session_state['p'] = {'thresh': 5.0, 'panic': 15, 'recovery': 30, 'allocPrudence': 50, 'allocCrash': 100, 'rollingWindow': 60, 'confirm': 2}
     pp = st.session_state['p']
     
@@ -401,9 +400,7 @@ with col_sidebar:
 
     st.markdown("---")
     st.markdown("### 🧠 AUTO TUNE")
-    
-    obj_mode = st.selectbox("Cible d'Optimisation", 
-                            ["Min Drawdown (Calmar)", "Max Rendement (CAGR)", "Max Sharpe (Risk-Adj)"])
+    obj_mode = st.selectbox("Cible", ["Max Performance (CAGR)", "Min Drawdown (Calmar)", "Max Sharpe (Risk-Adj)"])
     
     if st.button("LANCER L'OPTIMISATION"):
         d_opt = get_data(tickers, start_d, end_d)
@@ -416,18 +413,19 @@ with col_sidebar:
                 st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-# MAIN
+# --- MAIN ---
 with col_main:
     data = get_data(tickers, start_d, end_d)
     
     if data.empty or len(data) < 10:
-        st.error("❌ NO DATA.")
+        st.error("❌ NO DATA. Please verify tickers or date range.")
     else:
         sim_p = {'thresh': thresh, 'panic': panic, 'recovery': recov, 'allocPrudence': a_prud, 'allocCrash': a_crash, 'rollingWindow': 60, 'confirm': confirm, 'cost': cost}
         df_res, trades = BacktestEngine.run_simulation(data, sim_p)
         m_strat = AnalyticsEngine.calculate_metrics(df_res['portfolio'])
         m_bench = AnalyticsEngine.calculate_metrics(df_res['benchX2'])
         
+        # Modules Externes
         risk_s = RiskMetrics.get_full_risk_profile(df_res['portfolio']) if MODULES_STATUS["Risk"] else {}
         lev_beta = LeverageDiagnostics.calculate_realized_beta(data) if MODULES_STATUS["Leverage"] else pd.DataFrame()
         arb_sig = ArbitrageSignals.calculate_relative_strength(data) if MODULES_STATUS["Arbitrage"] else pd.DataFrame()
@@ -444,9 +442,10 @@ with col_main:
             
             st.markdown('<div class="glass-card">', unsafe_allow_html=True)
             
+            # SUBPLOTS
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
             
-            # Perf
+            # 1. Perf
             fig.add_trace(go.Scatter(x=df_res.index, y=df_res['portfolio'], name='STRATÉGIE', 
                                      line=dict(color='#A855F7', width=2)), row=1, col=1)
             fig.add_trace(go.Scatter(x=df_res.index, y=df_res['benchX2'], name='Risk (X2)', 
@@ -457,10 +456,10 @@ with col_main:
                 fig.add_annotation(x=t['date'], y=df_res.loc[t['date']]['portfolio'], text="▼" if t['to']!=0 else "▲", 
                                    showarrow=False, font=dict(color=c, size=14), row=1, col=1)
 
-            # Allocation
-            fig.add_trace(go.Scatter(x=df_res.index, y=df_res['weight_x2']*100, name='Alloc X2 (Risk)',
+            # 2. Alloc
+            fig.add_trace(go.Scatter(x=df_res.index, y=df_res['weight_x2']*100, name='Alloc X2',
                                      stackgroup='one', line=dict(width=0), fillcolor='rgba(239, 68, 68, 0.3)'), row=2, col=1)
-            fig.add_trace(go.Scatter(x=df_res.index, y=df_res['weight_x1']*100, name='Alloc X1 (Safe)',
+            fig.add_trace(go.Scatter(x=df_res.index, y=df_res['weight_x1']*100, name='Alloc X1',
                                      stackgroup='one', line=dict(width=0), fillcolor='rgba(16, 185, 129, 0.3)'), row=2, col=1)
 
             fig.update_layout(
@@ -475,14 +474,14 @@ with col_main:
             
             st.markdown("""
             <div style="display:flex; justify-content:center; gap:20px; font-size:12px; color:#888;">
-                <span style="color:#10b981">▲ Achat Offensif</span>
-                <span style="color:#ef4444">▼ Vente Panique (X1)</span>
+                <span style="color:#10b981">▲ Buy Risk</span>
+                <span style="color:#ef4444">▼ Panic Sell (X1)</span>
                 <span style="color:#f59e0b">▼ Prudence</span>
             </div>
             """, unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # --- TAB 2: PERFORMANCE DETAILED ---
+        # --- TAB 2: PERFORMANCE ---
         with t2:
             st.markdown("### 🏆 Tableau de Bord")
             p_data = {
@@ -492,7 +491,7 @@ with col_main:
             }
             st.markdown(pd.DataFrame(p_data).style.hide(axis="index").set_properties(**{'background-color': '#0A0A0F', 'color': '#eee', 'border-color': '#333'}).to_html(), unsafe_allow_html=True)
 
-        # --- TAB 3: RISK & LEVERAGE ---
+        # --- TAB 3: RISK ---
         with t3:
             c1, c2 = st.columns(2)
             with c1:
@@ -519,6 +518,7 @@ with col_main:
                 st.markdown("### 🎯 Arbitrage Z-Score")
                 curr_z = arb_sig['Z_Score'].iloc[-1]
                 st.metric("Z-Score", f"{curr_z:.2f}", delta="Rich" if curr_z>0 else "Cheap", delta_color="inverse")
+                
                 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
                 fig_z = go.Figure()
                 fig_z.add_trace(go.Scatter(x=arb_sig.index, y=arb_sig['Z_Score'], line=dict(color='#3b82f6', width=2)))
@@ -537,10 +537,10 @@ with col_main:
                 st.markdown('</div>', unsafe_allow_html=True)
             else: st.info("Arbitrage Module missing")
 
-        # --- TAB 5: FORECAST (MONTE CARLO PRO) ---
+        # --- TAB 5: FORECAST ---
         with t5:
             st.markdown("### 🔮 Prévisions de Marché (Fan Chart)")
-            st.caption("Projection probabiliste du portefeuille sur 252 jours (1 an).")
+            st.caption("Projection probabiliste du portefeuille sur les 252 prochains jours (1 an).")
             
             if st.button("Générer les Scénarios (200 Simulations)"):
                 with st.spinner("Calcul des trajectoires futures..."):
@@ -570,3 +570,6 @@ with col_main:
 
                     fig_mc.update_layout(paper_bgcolor='#0A0A0F', plot_bgcolor='#0A0A0F', font=dict(family="Inter", color='#E0E0E0'), height=450, title="Projection Future (Cône d'Incertitude)", xaxis_title="Jours Ouvrés", yaxis_title="Valeur")
                     st.plotly_chart(fig_mc, use_container_width=True)
+                    
+                    # Nettoyage
+                    gc.collect()
