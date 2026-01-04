@@ -89,23 +89,26 @@ def get_data(tickers, start, end):
     if not tickers or len(tickers) < 2:
         return pd.DataFrame()
     
-    data = {}
+    series_list = []
+    ticker_names = []
+    
     for ticker in tickers[:2]:  # On prend les 2 premiers
         try:
             df = yf.download(ticker, start=start, end=end, progress=False)
             if not df.empty:
                 # Prendre la colonne Close (ou Adj Close si dispo)
                 if 'Close' in df.columns:
-                    data[ticker] = df['Close']
+                    series_list.append(df['Close'])
                 elif 'Adj Close' in df.columns:
-                    data[ticker] = df['Adj Close']
+                    series_list.append(df['Adj Close'])
                 else:
-                    data[ticker] = df.iloc[:, 0]
+                    series_list.append(df.iloc[:, 0])
+                ticker_names.append(ticker)
         except:
             continue
     
-    if len(data) == 2:
-        result = pd.DataFrame(data)
+    if len(series_list) == 2:
+        result = pd.concat(series_list, axis=1, keys=ticker_names)
         result.columns = ['X2', 'X1']  # X2 = Risk, X1 = Safe
         result = result.ffill().dropna()
         return result
