@@ -1,8 +1,7 @@
 streamlit==1.30.0
-yfinance>=0.2.40
-pandas>=2.0.0
+yfinance
+pandas
 numpy
-scipy
 plotly
-matplotlib
-pip install requests-cache
+requests
+requests-cache
