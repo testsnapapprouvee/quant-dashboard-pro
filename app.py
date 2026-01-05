@@ -62,7 +62,7 @@ st.markdown("""
 # ==========================================
 @st.cache_data(ttl=3600)
 def get_data(tickers, start, end):
-    """Télécharge les NAVs Yahoo"""
+    """Télécharge les NAVs Yahoo - TOUJOURS utiliser Adj Close"""
     if not tickers or len(tickers) < 2:
         return pd.DataFrame()
     
@@ -72,10 +72,11 @@ def get_data(tickers, start, end):
         try:
             df = yf.download(ticker, start=start, end=end, progress=False)
             if not df.empty:
-                if 'Close' in df.columns:
-                    series_list.append(df['Close'])
-                elif 'Adj Close' in df.columns:
+                # 🔧 FIX: TOUJOURS prendre Adj Close en priorité !
+                if 'Adj Close' in df.columns:
                     series_list.append(df['Adj Close'])
+                elif 'Close' in df.columns:
+                    series_list.append(df['Close'])
                 else:
                     series_list.append(df.iloc[:, 0])
         except:
@@ -467,6 +468,42 @@ with col_main:
                 k2.metric("MaxDD", f"{met_strat['MaxDD']:.1f}%", delta=f"{met_strat['MaxDD']-met_x2['MaxDD']:.1f}%", delta_color="inverse")
                 k3.metric("Sharpe", f"{met_strat['Sharpe']:.2f}")
                 k4.metric("Trades", len(trades))
+                
+                # 🔍 DEBUG: Comparaison avec Yahoo Finance
+                with st.expander("🔍 DEBUG - Vérification des données"):
+                    st.markdown("**Comparaison Performance Brute vs Yahoo Finance:**")
+                    
+                    # Calcul simple price return
+                    start_price_x2 = data['X2'].iloc[0]
+                    end_price_x2 = data['X2'].iloc[-1]
+                    simple_return_x2 = ((end_price_x2 / start_price_x2) - 1) * 100
+                    
+                    start_price_x1 = data['X1'].iloc[0]
+                    end_price_x1 = data['X1'].iloc[-1]
+                    simple_return_x1 = ((end_price_x1 / start_price_x1) - 1) * 100
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric(f"{tickers[0]} Simple Return", f"{simple_return_x2:.2f}%")
+                        st.caption(f"Prix début: {start_price_x2:.2f} | Prix fin: {end_price_x2:.2f}")
+                    with col2:
+                        st.metric(f"{tickers[1]} Simple Return", f"{simple_return_x1:.2f}%")
+                        st.caption(f"Prix début: {start_price_x1:.2f} | Prix fin: {end_price_x1:.2f}")
+                    
+                    st.markdown("**Données téléchargées (premiers jours):**")
+                    st.dataframe(data.head(10))
+                    
+                    st.markdown("**Benchmarks calculés (premiers jours):**")
+                    st.dataframe(df_res[['bench_x2', 'bench_x1']].head(10))
+                    
+                    st.info("""
+                    💡 **Comment vérifier sur Yahoo Finance:**
+                    1. Va sur Yahoo Finance
+                    2. Cherche ton ticker (ex: LQQ.PA)
+                    3. Onglet "Historical Data"
+                    4. Regarde si "Adj Close" diffère de "Close"
+                    5. Si oui, il y a eu des dividendes/splits !
+                    """)
                 
                 if len(trades) == 0:
                     st.warning("⚠️ No trades executed")
