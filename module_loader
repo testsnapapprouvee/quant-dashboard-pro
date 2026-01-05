@@ -1,0 +1,7 @@
+import importlib
+
+def load_module(name):
+    try:
+        return importlib.import_module(f"modules.{name}")
+    except ModuleNotFoundError:
+        return None
