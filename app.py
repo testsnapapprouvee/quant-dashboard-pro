@@ -362,43 +362,44 @@ with col_sidebar:
     
     today = datetime.now()
 
-# Définition des dates selon le preset
-if sel_period == "YTD":
-    start_d = datetime(today.year, 1, 1)
-    end_d = today
-elif sel_period == "1Y":
-    start_d = today - timedelta(days=365)
-    end_d = today
-elif sel_period == "3YR":
-    start_d = today - timedelta(days=365*3)
-    end_d = today
-elif sel_period == "5YR":
-    start_d = today - timedelta(days=365*5)
-    end_d = today
-elif sel_period == "2022":
-    start_d = datetime(2022, 1, 1)
-    end_d = datetime(2022, 12, 31)
-elif sel_period == "2008":
-    start_d = datetime(2008, 1, 1)
-    end_d = datetime(2008, 12, 31)
-else:
-    start_d = st.date_input("Start", datetime(2022, 1, 1))
-    end_d = st.date_input("End", datetime(2022, 12, 31))
+    # Définition des dates selon le preset
+    if sel_period == "YTD":
+        start_d = datetime(today.year, 1, 1)
+        end_d = today
+    elif sel_period == "1Y":
+        start_d = today - timedelta(days=365)
+        end_d = today
+    elif sel_period == "3YR":
+        start_d = today - timedelta(days=365*3)
+        end_d = today
+    elif sel_period == "5YR":
+        start_d = today - timedelta(days=365*5)
+        end_d = today
+    elif sel_period == "2022":
+        start_d = datetime(2022, 1, 1)
+        end_d = datetime(2022, 12, 31)
+    elif sel_period == "2008":
+        start_d = datetime(2008, 1, 1)
+        end_d = datetime(2008, 12, 31)
+    else:
+        start_d = st.date_input("Start", datetime(2022, 1, 1))
+        end_d = st.date_input("End", datetime(2022, 12, 31))
 
-# ----------------------------
-# Ajustement automatique aux jours de trading
-# ----------------------------
-def adjust_to_trading_days(tickers, start, end):
-    # Récupère uniquement Adj Close
-    data = yf.download(tickers[:2], start=start, end=end, progress=False)['Adj Close']
-    data = data.dropna()
-    if data.empty:
-        return start, end  # si pas de data, retourne les dates originales
-    return data.index[0].to_pydatetime(), data.index[-1].to_pydatetime()
+    # ----------------------------
+    # Ajustement automatique aux jours de trading
+    # ----------------------------
+    def adjust_to_trading_days(tickers, start, end):
+        data = yf.download(tickers[:2], start=start, end=end, progress=False)['Adj Close']
+        data = data.dropna()
+        if data.empty:
+            return start, end
+        return data.index[0].to_pydatetime(), data.index[-1].to_pydatetime()
 
-start_d, end_d = adjust_to_trading_days(tickers, start_d, end_d)
+    start_d, end_d = adjust_to_trading_days(tickers, start_d, end_d)
 
-    
+    # ----------------------------
+    # STRATEGY PARAMETERS
+    # ----------------------------
     st.markdown("---")
     st.markdown("### ⚡ PARAMS")
     
@@ -438,6 +439,7 @@ start_d, end_d = adjust_to_trading_days(tickers, start_d, end_d)
     with st.expander("📦 Modules"):
         for mod, status in MODULES_STATUS.items():
             st.write(f"{'✅' if status else '❌'} {mod}")
+
 
 # --- MAIN ---
 with col_main:
