@@ -1,0 +1,49 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+
+@st.cache_data(ttl=3600)
+def load_data(tickers, start, end):
+    price_map = {}
+    for t in tickers:
+        try:
+            df = yf.download(t, start=start, end=end, progress=False, auto_adjust=True)
+            if df.empty:
+                df = yf.download(t, start=start, end=end, progress=False)
+            if not df.empty:
+                price_map[t] = df['Close']
+        except:
+            continue
+
+    if len(price_map) >= 2:
+        df_final = pd.concat(price_map.values(), axis=1)
+        df_final.columns = ["Risk", "Safe"]
+        df_final = df_final.ffill().dropna()
+        return df_final
+    return pd.DataFrame()
+
+def render_core():
+    st.title("📊 Mini Dashboard ETF")
+
+    tickers_input = st.text_input("Tickers (Risk, Safe)", "LQQ.PA, PUST.PA")
+    tickers = [t.strip().upper() for t in tickers_input.split(",")]
+
+    start_date = st.date_input("Start Date", datetime.now() - timedelta(days=180))
+    end_date = st.date_input("End Date", datetime.now())
+
+    df = load_data(tickers, start_date, end_date)
+
+    if df.empty:
+        st.error("❌ No data found.")
+        return None
+
+    st.write("### Raw Prices")
+    st.line_chart(df)
+
+    perf = df / df.iloc[0] * 100
+    st.write("### Normalized Performance")
+    st.line_chart(perf)
+
+    return df
