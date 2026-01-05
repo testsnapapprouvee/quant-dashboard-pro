@@ -62,7 +62,7 @@ st.markdown("""
 # ==========================================
 @st.cache_data(ttl=3600)
 def get_data(tickers, start, end):
-    """Télécharge les NAVs Yahoo"""
+    """Télécharge les NAVs Yahoo en utilisant Adj Close pour refléter les dividendes et splits"""
     if not tickers or len(tickers) < 2:
         return pd.DataFrame()
     
@@ -72,19 +72,20 @@ def get_data(tickers, start, end):
         try:
             df = yf.download(ticker, start=start, end=end, progress=False)
             if not df.empty:
-                if 'Close' in df.columns:
-                    series_list.append(df['Close'])
-                elif 'Adj Close' in df.columns:
+                # Toujours utiliser Adj Close si disponible, sinon Close
+                if 'Adj Close' in df.columns:
                     series_list.append(df['Adj Close'])
                 else:
-                    series_list.append(df.iloc[:, 0])
-        except:
+                    series_list.append(df['Close'])
+        except Exception as e:
+            print(f"Erreur sur {ticker}: {e}")
             continue
     
+    # Vérifier qu'on a bien deux séries
     if len(series_list) == 2:
         result = pd.concat(series_list, axis=1)
-        result.columns = ['X2', 'X1']
-        result = result.ffill().dropna()
+        result.columns = ['X2', 'X1']  # X2 = risque, X1 = safe
+        result = result.ffill().dropna()  # forward fill + supprimer les NaN
         return result
     
     return pd.DataFrame()
