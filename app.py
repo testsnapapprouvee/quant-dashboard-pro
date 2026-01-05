@@ -362,7 +362,9 @@ with col_sidebar:
     
     today = datetime.now()
 
+    # ----------------------------
     # Définition des dates selon le preset
+    # ----------------------------
     if sel_period == "YTD":
         start_d = datetime(today.year, 1, 1)
         end_d = today
@@ -389,17 +391,23 @@ with col_sidebar:
     # Ajustement automatique aux jours de trading
     # ----------------------------
     def adjust_to_trading_days(tickers, start, end):
-        data = yf.download(tickers[:2], start=start, end=end, progress=False)['Adj Close']
-        data = data.dropna()
-        if data.empty:
+        try:
+            data = yf.download(tickers[:2], start=start, end=end, progress=False)
+            if 'Adj Close' in data.columns:
+                # 1 ticker
+                data = data['Adj Close']
+            elif isinstance(data.columns, pd.MultiIndex):
+                # Plusieurs tickers
+                data = data.xs('Adj Close', axis=1, level=0)
+            data = data.dropna()
+            if data.empty:
+                return start, end
+            return data.index[0].to_pydatetime(), data.index[-1].to_pydatetime()
+        except:
             return start, end
-        return data.index[0].to_pydatetime(), data.index[-1].to_pydatetime()
 
     start_d, end_d = adjust_to_trading_days(tickers, start_d, end_d)
 
-    # ----------------------------
-    # STRATEGY PARAMETERS
-    # ----------------------------
     st.markdown("---")
     st.markdown("### ⚡ PARAMS")
     
@@ -439,7 +447,6 @@ with col_sidebar:
     with st.expander("📦 Modules"):
         for mod, status in MODULES_STATUS.items():
             st.write(f"{'✅' if status else '❌'} {mod}")
-
 
 # --- MAIN ---
 with col_main:
