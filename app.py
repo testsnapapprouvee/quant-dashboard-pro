@@ -62,7 +62,7 @@ st.markdown("""
 # ==========================================
 @st.cache_data(ttl=3600)
 def get_data(tickers, start, end):
-    """Récupère les prix réels (Adj Close) des deux tickers et garde uniquement les jours de trading communs"""
+    """Télécharge les NAVs Yahoo"""
     if not tickers or len(tickers) < 2:
         return pd.DataFrame()
     
@@ -72,16 +72,19 @@ def get_data(tickers, start, end):
         try:
             df = yf.download(ticker, start=start, end=end, progress=False)
             if not df.empty:
-                # Toujours utiliser Adj Close si dispo
-                series_list.append(df['Adj Close'])
-        except Exception as e:
-            print(f"Erreur sur {ticker}: {e}")
+                if 'Close' in df.columns:
+                    series_list.append(df['Close'])
+                elif 'Adj Close' in df.columns:
+                    series_list.append(df['Adj Close'])
+                else:
+                    series_list.append(df.iloc[:, 0])
+        except:
             continue
     
     if len(series_list) == 2:
         result = pd.concat(series_list, axis=1)
-        result.columns = ['X2', 'X1']  # X2 = risque, X1 = safe
-        result = result.dropna()        # IMPORTANT : seulement les jours où les deux tickers ont des données
+        result.columns = ['X2', 'X1']
+        result = result.ffill().dropna()
         return result
     
     return pd.DataFrame()
@@ -361,10 +364,7 @@ with col_sidebar:
     sel_period = st.selectbox("Period", period_options, index=4)
     
     today = datetime.now()
-
-    # ----------------------------
-    # Définition des dates selon le preset
-    # ----------------------------
+    
     if sel_period == "YTD":
         start_d = datetime(today.year, 1, 1)
         end_d = today
@@ -386,28 +386,7 @@ with col_sidebar:
     else:
         start_d = st.date_input("Start", datetime(2022, 1, 1))
         end_d = st.date_input("End", datetime(2022, 12, 31))
-
-    # ----------------------------
-    # Ajustement automatique aux jours de trading
-    # ----------------------------
-    def adjust_to_trading_days(tickers, start, end):
-        try:
-            data = yf.download(tickers[:2], start=start, end=end, progress=False)
-            if 'Adj Close' in data.columns:
-                # 1 ticker
-                data = data['Adj Close']
-            elif isinstance(data.columns, pd.MultiIndex):
-                # Plusieurs tickers
-                data = data.xs('Adj Close', axis=1, level=0)
-            data = data.dropna()
-            if data.empty:
-                return start, end
-            return data.index[0].to_pydatetime(), data.index[-1].to_pydatetime()
-        except:
-            return start, end
-
-    start_d, end_d = adjust_to_trading_days(tickers, start_d, end_d)
-
+    
     st.markdown("---")
     st.markdown("### ⚡ PARAMS")
     
