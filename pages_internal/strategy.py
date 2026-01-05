@@ -10,7 +10,8 @@ from modules.data_engine import get_data  # moteur de données
 from modules.risk_metrics import RiskMetrics
 from modules.leverage_diagnostics import LeverageDiagnostics
 from modules.backtest_engine import VectorizedBacktester  # ton engine existant
-from modules.optimizer import Optimizer  # ton optimizer existant
+from modules.optimization import SmartOptimizer
+
 
 # ==========================================
 # PAGE STRATEGIE
