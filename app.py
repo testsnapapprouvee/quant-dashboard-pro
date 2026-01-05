@@ -137,23 +137,6 @@ st.markdown("""
     }
     
     /* Metric Cards */
-    .metric-card {
-        background: linear-gradient(135deg, rgba(30, 41, 59, 0.6) 0%, rgba(30, 41, 59, 0.4) 100%);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 16px;
-        transition: all 0.3s ease;
-    }
-    
-    .metric-card:hover {
-        border-color: rgba(59, 130, 246, 0.3);
-        box-shadow: 0 4px 16px rgba(59, 130, 246, 0.1);
-        transform: translateY(-2px);
-    }
-    
-    /* Streamlit Metric Override */
     [data-testid="stMetricValue"] {
         font-size: 28px;
         font-weight: 700;
@@ -316,21 +299,17 @@ class BacktestEngine:
         dates = data.index
         n = len(data)
         
-        # Normalize benchmarks to base 100
         bench_x2 = (data['X2'] / data['X2'].iloc[0]) * 100
         bench_x1 = (data['X1'] / data['X1'].iloc[0]) * 100
         
-        # Initialize portfolio
         portfolio_nav = 100.0
         position_x2 = 100.0
         position_x1 = 0.0
         
-        # Regime variables
         current_regime = 'R0'
         pending_regime = 'R0'
         confirm_count = 0
         
-        # Drawdown variables
         price_history = []
         peak_at_crash = 0.0
         trough = 0.0
@@ -338,7 +317,6 @@ class BacktestEngine:
         results = []
         trades = []
         
-        # Parameters
         rolling_window = int(params['rollingWindow'])
         threshold = params['thresh']
         panic = params['panic']
@@ -349,7 +327,6 @@ class BacktestEngine:
         tx_cost = params.get('cost', 0.001)
         
         for i in range(n):
-            # 1. Calculate return
             if i > 0:
                 ret_x2 = (prices_x2[i] / prices_x2[i-1]) - 1
                 ret_x1 = (prices_x1[i] / prices_x1[i-1]) - 1
@@ -358,7 +335,6 @@ class BacktestEngine:
                 position_x1 *= (1 + ret_x1)
                 portfolio_nav = position_x2 + position_x1
             
-            # 2. Calculate drawdown
             price_history.append(prices_x2[i])
             if len(price_history) > rolling_window:
                 price_history.pop(0)
@@ -366,7 +342,6 @@ class BacktestEngine:
             peak = max(price_history)
             current_dd = ((prices_x2[i] - peak) / peak) * 100 if peak > 0 else 0
             
-            # 3. Determine regime
             target_regime = current_regime
             
             if current_regime != 'R2':
@@ -377,7 +352,6 @@ class BacktestEngine:
                 else:
                     target_regime = 'R0'
             
-            # Recovery
             if current_regime in ['R1', 'R2']:
                 if prices_x2[i] < trough:
                     trough = prices_x2[i]
@@ -395,14 +369,12 @@ class BacktestEngine:
                 peak_at_crash = peak
                 trough = prices_x2[i]
             
-            # 4. Confirmation
             if target_regime == pending_regime:
                 confirm_count += 1
             else:
                 pending_regime = target_regime
                 confirm_count = 0
             
-            # 5. Execution
             if confirm_count >= confirm_days and pending_regime != current_regime:
                 old_regime = current_regime
                 current_regime = pending_regime
@@ -438,7 +410,6 @@ class BacktestEngine:
                 
                 confirm_count = 0
             
-            # 6. Store
             total = position_x2 + position_x1
             alloc_x2_pct = (position_x2 / total * 100) if total > 0 else 0
             alloc_x1_pct = (position_x1 / total * 100) if total > 0 else 0
@@ -474,12 +445,10 @@ def calculate_metrics(series):
         years = days / 252
         cagr = ((series.iloc[-1] / series.iloc[0]) ** (1/years) - 1) if years > 0 else 0
         
-        # Drawdown analysis
         cum_max = series.cummax()
         drawdown = (series - cum_max) / cum_max
         max_dd = drawdown.min()
         
-        # Drawdown duration (days)
         dd_duration = 0
         current_dd = 0
         for dd in drawdown:
@@ -494,29 +463,23 @@ def calculate_metrics(series):
             vol = returns.std() * np.sqrt(252)
             sharpe = cagr / vol if vol > 0 else 0
             
-            # Sortino Ratio (downside deviation)
             downside_returns = returns[returns < 0]
             downside_std = downside_returns.std() * np.sqrt(252) if len(downside_returns) > 0 else vol
             sortino = cagr / downside_std if downside_std > 0 else 0
             
-            # VaR & CVaR (95%)
             var_95 = returns.quantile(0.05)
             cvar_95 = returns[returns <= var_95].mean()
             
-            # Omega Ratio
             threshold = 0
             gains = returns[returns > threshold].sum()
             losses = abs(returns[returns <= threshold].sum())
             omega = gains / losses if losses > 0 else 0
             
-            # Skewness & Kurtosis
             skew = returns.skew()
             kurt = returns.kurtosis()
             
-            # Tail Ratio (95th percentile / 5th percentile)
             tail_ratio = abs(returns.quantile(0.95) / returns.quantile(0.05)) if returns.quantile(0.05) != 0 else 0
             
-            # Ulcer Performance Index
             ulcer_index = np.sqrt(np.mean(drawdown ** 2))
             upi = cagr / ulcer_index if ulcer_index > 0 else 0
         else:
@@ -595,12 +558,7 @@ class Optimizer:
     
     @staticmethod
     def walk_forward_analysis(data, fixed_params, profile, train_days=252, test_days=63, step_days=21):
-        """
-        Walk-Forward Optimization to prevent overfitting
-        - train_days: training window size (e.g., 252 = 1 year)
-        - test_days: test window size (e.g., 63 = 3 months)
-        - step_days: rolling step (e.g., 21 = 1 month)
-        """
+        """Walk-Forward Optimization to prevent overfitting"""
         results = []
         optimized_params_history = []
         
@@ -608,23 +566,19 @@ class Optimizer:
         current_start = 0
         
         while current_start + train_days + test_days <= total_days:
-            # Training window
             train_end = current_start + train_days
             train_data = data.iloc[current_start:train_end]
             
-            # Optimize on training data
             best_params, score = Optimizer.run_grid_search(train_data, profile, fixed_params)
             
             if not best_params:
                 current_start += step_days
                 continue
             
-            # Test window
             test_start = train_end
             test_end = min(test_start + test_days, total_days)
             test_data = data.iloc[test_start:test_end]
             
-            # Run backtest on test data with optimized params
             test_params = fixed_params.copy()
             test_params.update(best_params)
             
@@ -738,10 +692,10 @@ with st.sidebar:
     
     opt_col1, opt_col2 = st.columns(2)
     with opt_col1:
-        if st.button(f"⚡ STANDARD OPTIMIZE"):
+        if st.button(f"⚡ STANDARD"):
             opt_data = get_data(tickers, start_d, end_d)
             if not opt_data.empty:
-                with st.spinner("Running optimization engine..."):
+                with st.spinner("Running optimization..."):
                     base_params = {
                         'allocPrudence': alloc_prud,
                         'allocCrash': alloc_crash,
@@ -752,14 +706,14 @@ with st.sidebar:
                     best_p, score = Optimizer.run_grid_search(opt_data, profile, base_params)
                     if best_p:
                         st.session_state['params'] = best_p
-                        st.success(f"✓ Optimization Complete | Score: {score:.2f}")
+                        st.success(f"✓ Score: {score:.2f}")
                         st.rerun()
     
     with opt_col2:
-        if st.button(f"🔬 WALK-FORWARD"):
+        if st.button(f"🔬 W-FORWARD"):
             opt_data = get_data(tickers, start_d, end_d)
             if not opt_data.empty and len(opt_data) >= 400:
-                with st.spinner("Running walk-forward analysis..."):
+                with st.spinner("Running walk-forward..."):
                     base_params = {
                         'allocPrudence': alloc_prud,
                         'allocCrash': alloc_crash,
@@ -774,17 +728,16 @@ with st.sidebar:
                     if not wf_results.empty:
                         st.session_state['wf_results'] = wf_results
                         st.session_state['wf_params'] = wf_params
-                        # Use most recent optimized params
                         latest_params = {
                             'thresh': wf_results.iloc[-1]['thresh'],
                             'panic': wf_results.iloc[-1]['panic'],
                             'recovery': wf_results.iloc[-1]['recovery']
                         }
                         st.session_state['params'] = latest_params
-                        st.success(f"✓ Walk-Forward Complete | {len(wf_results)} periods analyzed")
+                        st.success(f"✓ {len(wf_results)} periods")
                         st.rerun()
             else:
-                st.warning("⚠ Insufficient data for walk-forward (need 400+ days)")
+                st.warning("⚠ Need 400+ days")
     
     st.markdown('<div class="section-header">System Status</div>', unsafe_allow_html=True)
     with st.expander("Module Diagnostics"):
@@ -821,11 +774,10 @@ else:
         lev_beta = LeverageDiagnostics.calculate_realized_beta(data) if MODULES_STATUS["Leverage"] else pd.DataFrame()
         arb_sig = ArbitrageSignals.calculate_relative_strength(data) if MODULES_STATUS["Arbitrage"] else pd.DataFrame()
         
-        tabs = st.tabs(["📊 Performance Analytics", "⚠ Risk Management", "🎯 Signal Intelligence", "🔬 Walk-Forward Analysis", "🎲 Monte Carlo Validation"])
+        tabs = st.tabs(["📊 Performance", "⚠ Risk", "🎯 Signals", "🔬 Walk-Forward", "🎲 Monte Carlo"])
         
         # --- TAB 1: PERFORMANCE ---
         with tabs[0]:
-            # KPI Cards
             k1, k2, k3, k4, k5, k6 = st.columns(6)
             k1.metric("CAGR", f"{met_strat['CAGR']:.2f}%", delta=f"{met_strat['CAGR']-met_x2['CAGR']:.2f}%")
             k2.metric("Sharpe", f"{met_strat['Sharpe']:.3f}")
@@ -836,19 +788,16 @@ else:
             
             st.markdown("---")
             
-            # Performance Chart
             st.markdown("#### Cumulative Performance (Base 100)")
             chart_data = df_res[['strategy', 'bench_x2', 'bench_x1']].copy()
             chart_data.columns = ['Strategy', f'{tickers[0]} (Risk)', f'{tickers[1]} (Safe)']
-            st.line_chart(chart_data, height=450)
+            st.line_chart(chart_data, height=400)
             
-            # Allocation Chart
             st.markdown("#### Dynamic Asset Allocation")
             alloc_data = df_res[['alloc_x2', 'alloc_x1']].copy()
             alloc_data.columns = ['Risk Asset (%)', 'Safe Asset (%)']
-            st.area_chart(alloc_data, height=300)
+            st.area_chart(alloc_data, height=250)
             
-            # Performance Table
             st.markdown("#### Performance Metrics Comparison")
             perf_df = pd.DataFrame({
                 "Metric": ["Total Return", "CAGR", "Maximum Drawdown", "DD Duration (days)", "Annualized Volatility", 
@@ -890,53 +839,20 @@ else:
                     f"{met_x1['UPI']:.3f}"
                 ]
             })
-                    f"{met_x1['Cumul']:.2f}%",
-                    f"{met_x1['CAGR']:.2f}%",
-                    f"{met_x1['MaxDD']:.2f}%",
-                    f"{met_x1['Vol']:.2f}%",
-                    f"{met_x1['Sharpe']:.3f}",
-                    f"{met_x1['Calmar']:.3f}"
-                ]
-            })
             st.dataframe(perf_df, use_container_width=True, hide_index=True)
             
-            # Trade Log
             if len(trades) > 0:
                 st.markdown("#### Transaction History")
                 trades_df = pd.DataFrame(trades)
                 trades_df['date'] = trades_df['date'].dt.strftime('%Y-%m-%d')
                 trades_df['portfolio'] = trades_df['portfolio'].apply(lambda x: f"{x:.2f}")
-                trades_df.columns = ['Date', 'From Regime', 'To Regime', 'Signal Type', 'Portfolio Value']
+                trades_df.columns = ['Date', 'From', 'To', 'Signal', 'Portfolio']
                 st.dataframe(trades_df, use_container_width=True, hide_index=True)
             else:
-                st.info("ℹ No regime transitions detected during this period")
-            
-            # Debug Section
-            with st.expander("🔍 Data Quality Diagnostics"):
-                st.markdown("**Price Data Verification:**")
-                
-                start_price_x2 = data['X2'].iloc[0]
-                end_price_x2 = data['X2'].iloc[-1]
-                simple_return_x2 = ((end_price_x2 / start_price_x2) - 1) * 100
-                
-                start_price_x1 = data['X1'].iloc[0]
-                end_price_x1 = data['X1'].iloc[-1]
-                simple_return_x1 = ((end_price_x1 / start_price_x1) - 1) * 100
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric(f"{tickers[0]} Simple Return", f"{simple_return_x2:.2f}%")
-                    st.caption(f"Initial: ${start_price_x2:.2f} | Final: ${end_price_x2:.2f}")
-                with col2:
-                    st.metric(f"{tickers[1]} Simple Return", f"{simple_return_x1:.2f}%")
-                    st.caption(f"Initial: ${start_price_x1:.2f} | Final: ${end_price_x1:.2f}")
-                
-                st.markdown("**Sample Data (First 10 observations):**")
-                st.dataframe(data.head(10), use_container_width=True)
+                st.info("ℹ No regime transitions detected")
         
         # --- TAB 2: RISK ---
         with tabs[1]:
-            # Advanced Risk Metrics
             st.markdown("#### Comprehensive Risk Profile")
             
             risk_col1, risk_col2, risk_col3, risk_col4 = st.columns(4)
@@ -956,32 +872,28 @@ else:
                     st.metric("Value at Risk (95%)", f"{risk_s.get('VaR_95', 0)*100:.2f}%")
                     st.metric("Conditional VaR (95%)", f"{risk_s.get('CVaR_95', 0)*100:.2f}%")
                 else:
-                    st.info("ℹ Advanced risk analytics module not available")
+                    st.info("ℹ Advanced risk module not available")
             
             with col2:
                 st.markdown("#### Leverage Diagnostics")
                 if not lev_beta.empty and 'Realized_Beta' in lev_beta.columns:
                     current_beta = lev_beta['Realized_Beta'].iloc[-1]
                     st.metric("Current Realized Beta", f"{current_beta:.2f}×")
-                    st.line_chart(lev_beta['Realized_Beta'], height=250)
+                    st.line_chart(lev_beta['Realized_Beta'], height=200)
                 else:
-                    st.info("ℹ Leverage diagnostics module not available")
+                    st.info("ℹ Leverage module not available")
             
             st.markdown("---")
-            
-            # Drawdown Analysis
             st.markdown("#### Drawdown Analysis")
             dd_strat = (df_res['strategy'] / df_res['strategy'].cummax() - 1) * 100
             dd_x2 = (df_res['bench_x2'] / df_res['bench_x2'].cummax() - 1) * 100
             
             dd_chart = pd.DataFrame({
-                'Strategy Drawdown': dd_strat,
-                f'{tickers[0]} Drawdown': dd_x2
+                'Strategy': dd_strat,
+                f'{tickers[0]}': dd_x2
             })
+            st.line_chart(dd_chart, height=300)
             
-            st.line_chart(dd_chart, height=350)
-            
-            # Risk Statistics Table
             st.markdown("#### Risk Statistics Summary")
             risk_stats = pd.DataFrame({
                 "Risk Metric": ["Downside Deviation", "Sortino Ratio", "VaR (95%)", "CVaR (95%)", 
@@ -1016,60 +928,22 @@ else:
                 
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Current Z-Score", f"{curr_z:.3f}")
-                col2.metric("Signal Status", "Neutral" if abs(curr_z) < 1 else ("Overbought" if curr_z > 0 else "Oversold"))
-                col3.metric("Confidence Level", f"{min(abs(curr_z) / 2 * 100, 100):.0f}%")
+                col2.metric("Signal", "Neutral" if abs(curr_z) < 1 else ("Overbought" if curr_z > 0 else "Oversold"))
+                col3.metric("Confidence", f"{min(abs(curr_z) / 2 * 100, 100):.0f}%")
                 
                 st.markdown("---")
                 st.markdown("#### Arbitrage Z-Score Evolution")
-                st.line_chart(arb_sig['Z_Score'], height=400)
-                
-                st.markdown("#### Signal Interpretation")
-                st.markdown("""
-                <div style="background: rgba(30, 41, 59, 0.4); padding: 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.06);">
-                    <p style="margin: 0; color: #9CA3AF; line-height: 1.6;">
-                        <strong style="color: #FFFFFF;">Z-Score Analysis:</strong><br/>
-                        • <strong>|Z| < 1.0:</strong> Normal market conditions, relative pricing in equilibrium<br/>
-                        • <strong>1.0 < |Z| < 2.0:</strong> Moderate deviation, potential arbitrage opportunity<br/>
-                        • <strong>|Z| > 2.0:</strong> Significant deviation, strong arbitrage signal<br/>
-                        • <strong>Positive Z:</strong> Risk asset relatively expensive vs safe asset<br/>
-                        • <strong>Negative Z:</strong> Risk asset relatively cheap vs safe asset
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.line_chart(arb_sig['Z_Score'], height=350)
             else:
-                st.info("ℹ Arbitrage signal intelligence module not available")
-                st.markdown("""
-                <div style="background: rgba(30, 41, 59, 0.4); padding: 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.06); margin-top: 20px;">
-                    <p style="margin: 0; color: #9CA3AF;">
-                        Enable the <strong style="color: #FFFFFF;">Arbitrage Signals</strong> module to access:
-                    </p>
-                    <ul style="color: #9CA3AF; margin-top: 10px;">
-                        <li>Real-time relative strength indicators</li>
-                        <li>Statistical arbitrage opportunities</li>
-                        <li>Mean reversion signals</li>
-                        <li>Pair trading recommendations</li>
-                    </ul>
-                </div>
-                """, unsafe_allow_html=True)
+                st.info("ℹ Arbitrage signal module not available")
         
-        # --- TAB 4: WALK-FORWARD ANALYSIS ---
+        # --- TAB 4: WALK-FORWARD ---
         with tabs[3]:
             st.markdown("#### Walk-Forward Optimization Analysis")
-            st.markdown("""
-            <div style="background: rgba(30, 41, 59, 0.4); padding: 16px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.06); margin-bottom: 24px;">
-                <p style="margin: 0; color: #9CA3AF; font-size: 14px;">
-                    <strong style="color: #FFFFFF;">Out-of-Sample Validation:</strong><br/>
-                    Walk-forward analysis prevents overfitting by optimizing on a training window, then testing on an unseen future window.
-                    This rolling process simulates real-world strategy deployment where parameters are periodically re-optimized.
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
             
             if 'wf_results' in st.session_state and not st.session_state['wf_results'].empty:
                 wf_df = st.session_state['wf_results']
-                wf_params = st.session_state['wf_params']
                 
-                # Summary metrics
                 st.markdown("#### Out-of-Sample Performance")
                 wf_col1, wf_col2, wf_col3, wf_col4 = st.columns(4)
                 wf_col1.metric("Avg Test CAGR", f"{wf_df['test_cagr'].mean():.2f}%")
@@ -1078,261 +952,109 @@ else:
                 wf_col4.metric("Win Rate", f"{(wf_df['test_cagr'] > 0).mean()*100:.1f}%")
                 
                 st.markdown("---")
-                
-                # Results timeline
                 st.markdown("#### Walk-Forward Results Timeline")
-                wf_chart_data = wf_df.set_index('test_start')[['test_cagr', 'test_sharpe', 'test_maxdd']]
-                wf_chart_data.columns = ['Test CAGR (%)', 'Test Sharpe', 'Test Max DD (%)']
-                st.line_chart(wf_chart_data, height=300)
+                wf_chart = wf_df.set_index('test_start')[['test_cagr', 'test_sharpe']]
+                wf_chart.columns = ['Test CAGR (%)', 'Test Sharpe']
+                st.line_chart(wf_chart, height=300)
                 
-                # Parameter stability
-                st.markdown("#### Parameter Stability Analysis")
-                param_chart = wf_df.set_index('test_start')[['thresh', 'panic', 'recovery']]
-                param_chart.columns = ['Threshold', 'Panic', 'Recovery']
-                st.line_chart(param_chart, height=250)
-                
-                # Detailed results table
-                st.markdown("#### Detailed Walk-Forward Results")
+                st.markdown("#### Detailed Results")
                 display_wf = wf_df.copy()
-                display_wf['train_start'] = display_wf['train_start'].dt.strftime('%Y-%m-%d')
                 display_wf['test_start'] = display_wf['test_start'].dt.strftime('%Y-%m-%d')
                 display_wf = display_wf[['test_start', 'thresh', 'panic', 'recovery', 'test_cagr', 'test_sharpe', 'test_maxdd']]
-                display_wf.columns = ['Test Period', 'Threshold', 'Panic', 'Recovery', 'CAGR (%)', 'Sharpe', 'Max DD (%)']
+                display_wf.columns = ['Period', 'Threshold', 'Panic', 'Recovery', 'CAGR', 'Sharpe', 'MaxDD']
                 st.dataframe(display_wf, use_container_width=True, hide_index=True)
-                
-                # Statistical analysis
-                st.markdown("#### Statistical Robustness")
-                stat_col1, stat_col2 = st.columns(2)
-                
-                with stat_col1:
-                    st.markdown("**CAGR Distribution:**")
-                    st.bar_chart(wf_df['test_cagr'].sort_values(), height=200)
-                
-                with stat_col2:
-                    st.markdown("**Sharpe Distribution:**")
-                    st.bar_chart(wf_df['test_sharpe'].sort_values(), height=200)
-                
-                # Interpretation
-                st.markdown("""
-                <div style="background: rgba(59, 130, 246, 0.1); padding: 16px; border-radius: 12px; border: 1px solid rgba(59, 130, 246, 0.3); margin-top: 16px;">
-                    <p style="margin: 0; color: #9CA3AF; font-size: 13px;">
-                        <strong style="color: #3B82F6;">✓ Interpretation:</strong> 
-                        Consistent positive test period returns indicate strategy robustness. 
-                        High parameter stability suggests genuine market regime detection rather than curve-fitting.
-                        Parameter drift over time reflects adaptive optimization to changing market conditions.
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
-                
             else:
-                st.info("📊 Run Walk-Forward Analysis from the sidebar to see out-of-sample validation results")
-                st.markdown("""
-                <div style="background: rgba(30, 41, 59, 0.4); padding: 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.06); margin-top: 20px;">
-                    <p style="margin: 0; color: #9CA3AF; line-height: 1.8;">
-                        <strong style="color: #FFFFFF;">Walk-Forward Process:</strong><br/><br/>
-                        1. <strong>Training Window:</strong> Optimize parameters on historical data (e.g., 1 year)<br/>
-                        2. <strong>Testing Window:</strong> Apply optimized parameters to unseen future data (e.g., 3 months)<br/>
-                        3. <strong>Rolling Forward:</strong> Shift both windows forward and repeat (e.g., monthly steps)<br/>
-                        4. <strong>Analysis:</strong> Aggregate out-of-sample results to assess true performance<br/><br/>
-                        <strong style="color: #FFFFFF;">Benefits:</strong><br/>
-                        • Prevents overfitting by validating on unseen data<br/>
-                        • Simulates realistic strategy deployment<br/>
-                        • Reveals parameter stability and adaptability<br/>
-                        • Provides confidence in forward-looking performance
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.info("📊 Run Walk-Forward Analysis from sidebar")
         
-        # --- TAB 5: MONTE CARLO VALIDATION ---
-        with tabs[4]:
-        # --- TAB 5: MONTE CARLO VALIDATION ---
+        # --- TAB 5: MONTE CARLO ---
         with tabs[4]:
             st.markdown("#### Monte Carlo Bootstrap Validation")
-            st.markdown("""
-            <div style="background: rgba(30, 41, 59, 0.4); padding: 16px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.06); margin-bottom: 24px;">
-                <p style="margin: 0; color: #9CA3AF; font-size: 14px;">
-                    <strong style="color: #FFFFFF;">Robust Statistical Validation:</strong><br/>
-                    Block bootstrap resampling preserves return autocorrelation structure while generating alternative market scenarios.
-                    Run 1000+ simulations for comprehensive statistical confidence in strategy robustness.
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
             
-            # Bootstrap configuration
-            mc_col1, mc_col2, mc_col3 = st.columns(3)
+            mc_col1, mc_col2 = st.columns(2)
             with mc_col1:
-                n_simulations = st.number_input("Number of Simulations", min_value=100, max_value=5000, value=1000, step=100)
+                n_sims = st.number_input("Simulations", 100, 2000, 500, 100)
             with mc_col2:
-                block_size = st.number_input("Block Size (days)", min_value=1, max_value=21, value=5, step=1)
-            with mc_col3:
-                confidence_level = st.selectbox("Confidence Level", [90, 95, 99], index=1)
+                block_size = st.number_input("Block Size", 1, 21, 5, 1)
             
-            def run_block_bootstrap(data, params, n_runs=1000, block_size=5):
-                """Block bootstrap to preserve autocorrelation"""
+            def run_block_bootstrap(data, params, n_runs=500, block_size=5):
                 rets = data.pct_change().dropna()
                 results = []
-                
                 progress_bar = st.progress(0)
                 status_text = st.empty()
-                
                 n_blocks = len(rets) // block_size
                 
                 for i in range(n_runs):
                     if i % 50 == 0:
-                        status_text.text(f"Running simulation {i+1}/{n_runs}...")
+                        status_text.text(f"Simulation {i+1}/{n_runs}")
                         progress_bar.progress((i + 1) / n_runs)
                     
                     try:
-                        # Block bootstrap sampling
                         boot_blocks = []
                         for _ in range(n_blocks):
                             start_idx = np.random.randint(0, len(rets) - block_size)
                             boot_blocks.append(rets.iloc[start_idx:start_idx + block_size])
                         
-                        boot_rets = pd.concat(boot_blocks, ignore_index=True)
-                        boot_rets = boot_rets.iloc[:len(rets)]  # Trim to original length
+                        boot_rets = pd.concat(boot_blocks, ignore_index=True).iloc[:len(rets)]
                         boot_rets.index = rets.index
                         
-                        # Reconstruct prices
                         boot_x2 = (1 + boot_rets['X2']).cumprod() * data['X2'].iloc[0]
                         boot_x1 = (1 + boot_rets['X1']).cumprod() * data['X1'].iloc[0]
-                        
                         boot_data = pd.DataFrame({'X2': boot_x2, 'X1': boot_x1}, index=rets.index)
-                        sim, _ = BacktestEngine.run_simulation(boot_data, params)
                         
+                        sim, _ = BacktestEngine.run_simulation(boot_data, params)
                         if not sim.empty:
-                            metrics = calculate_metrics(sim['strategy'])
-                            results.append(metrics)
+                            results.append(calculate_metrics(sim['strategy']))
                     except:
                         continue
                 
                 progress_bar.empty()
                 status_text.empty()
-                
                 return pd.DataFrame(results)
             
-            if st.button("▶ EXECUTE MONTE CARLO VALIDATION"):
-                with st.spinner(f"Executing {n_simulations} block bootstrap simulations..."):
-                    mc_df = run_block_bootstrap(data, sim_params, n_runs=n_simulations, block_size=block_size)
+            if st.button("▶ EXECUTE MONTE CARLO"):
+                with st.spinner(f"Running {n_sims} simulations..."):
+                    mc_df = run_block_bootstrap(data, sim_params, n_runs=n_sims, block_size=block_size)
                     
                     if not mc_df.empty:
                         st.markdown("---")
-                        st.markdown("#### Monte Carlo Results")
+                        st.markdown("#### Results")
                         
-                        # Summary statistics
-                        lower_pct = (100 - confidence_level) / 2
-                        upper_pct = 100 - lower_pct
-                        
-                        mc_col1, mc_col2, mc_col3, mc_col4, mc_col5 = st.columns(5)
+                        mc_col1, mc_col2, mc_col3, mc_col4 = st.columns(4)
                         mc_col1.metric("Median CAGR", f"{mc_df['CAGR'].median():.2f}%")
-                        mc_col2.metric(f"{lower_pct:.0f}th Percentile", f"{mc_df['CAGR'].quantile(lower_pct/100):.2f}%")
-                        mc_col3.metric(f"{upper_pct:.0f}th Percentile", f"{mc_df['CAGR'].quantile(upper_pct/100):.2f}%")
+                        mc_col2.metric("5th %ile", f"{mc_df['CAGR'].quantile(0.05):.2f}%")
+                        mc_col3.metric("95th %ile", f"{mc_df['CAGR'].quantile(0.95):.2f}%")
                         mc_col4.metric("Win Rate", f"{(mc_df['CAGR'] > 0).mean()*100:.1f}%")
-                        mc_col5.metric("Std Dev", f"{mc_df['CAGR'].std():.2f}%")
                         
-                        st.markdown("---")
+                        st.markdown("#### CAGR Distribution")
+                        st.bar_chart(mc_df['CAGR'].sort_values(), height=300)
                         
-                        # Distribution charts
-                        chart_col1, chart_col2 = st.columns(2)
-                        
-                        with chart_col1:
-                            st.markdown("#### CAGR Distribution")
-                            st.bar_chart(mc_df['CAGR'].sort_values(), height=300)
-                        
-                        with chart_col2:
-                            st.markdown("#### Sharpe Distribution")
-                            st.bar_chart(mc_df['Sharpe'].sort_values(), height=300)
-                        
-                        # Comprehensive statistics table
-                        st.markdown("#### Statistical Summary (All Metrics)")
-                        stats_metrics = ['CAGR', 'Sharpe', 'Sortino', 'MaxDD', 'Calmar', 'Omega']
+                        st.markdown("#### Statistical Summary")
                         stats_rows = []
-                        
-                        for metric in stats_metrics:
+                        for metric in ['CAGR', 'Sharpe', 'Sortino', 'MaxDD']:
                             if metric in mc_df.columns:
                                 stats_rows.append({
                                     'Metric': metric,
                                     'Mean': f"{mc_df[metric].mean():.3f}",
                                     'Median': f"{mc_df[metric].median():.3f}",
                                     'Std Dev': f"{mc_df[metric].std():.3f}",
-                                    f'{lower_pct:.0f}th %ile': f"{mc_df[metric].quantile(lower_pct/100):.3f}",
-                                    f'{upper_pct:.0f}th %ile': f"{mc_df[metric].quantile(upper_pct/100):.3f}",
                                     'Min': f"{mc_df[metric].min():.3f}",
                                     'Max': f"{mc_df[metric].max():.3f}"
                                 })
+                        st.dataframe(pd.DataFrame(stats_rows), use_container_width=True, hide_index=True)
                         
-                        stats_df = pd.DataFrame(stats_rows)
-                        st.dataframe(stats_df, use_container_width=True, hide_index=True)
-                        
-                        # Risk analysis
-                        st.markdown("#### Risk Metrics Distribution")
-                        risk_col1, risk_col2 = st.columns(2)
-                        
-                        with risk_col1:
-                            st.markdown("**Maximum Drawdown**")
-                            st.bar_chart(mc_df['MaxDD'].sort_values(), height=250)
-                        
-                        with risk_col2:
-                            st.markdown("**Volatility**")
-                            st.bar_chart(mc_df['Vol'].sort_values(), height=250)
-                        
-                        # Confidence intervals
-                        st.markdown(f"#### {confidence_level}% Confidence Intervals")
-                        ci_data = []
-                        for metric in ['CAGR', 'Sharpe', 'Sortino', 'MaxDD', 'Calmar']:
-                            if metric in mc_df.columns:
-                                ci_data.append({
-                                    'Metric': metric,
-                                    'Lower Bound': f"{mc_df[metric].quantile(lower_pct/100):.3f}",
-                                    'Point Estimate': f"{mc_df[metric].median():.3f}",
-                                    'Upper Bound': f"{mc_df[metric].quantile(upper_pct/100):.3f}",
-                                    'Range': f"{mc_df[metric].quantile(upper_pct/100) - mc_df[metric].quantile(lower_pct/100):.3f}"
-                                })
-                        
-                        ci_df = pd.DataFrame(ci_data)
-                        st.dataframe(ci_df, use_container_width=True, hide_index=True)
-                        
-                        # Interpretation
                         win_rate = (mc_df['CAGR'] > 0).mean() * 100
-                        median_cagr = mc_df['CAGR'].median()
-                        
-                        if win_rate >= 70 and median_cagr > 5:
-                            status_color = "#22C55E"
-                            status_text = "✓ HIGHLY ROBUST"
-                            interpretation = "Strategy demonstrates strong robustness with high win rate and positive median return across simulations."
-                        elif win_rate >= 50 and median_cagr > 0:
-                            status_color = "#3B82F6"
-                            status_text = "○ MODERATELY ROBUST"
-                            interpretation = "Strategy shows acceptable robustness. Consider additional risk controls for improved consistency."
+                        if win_rate >= 70:
+                            st.success("✓ HIGHLY ROBUST STRATEGY")
+                        elif win_rate >= 50:
+                            st.info("○ MODERATELY ROBUST")
                         else:
-                            status_color = "#EF4444"
-                            status_text = "⚠ REQUIRES REVIEW"
-                            interpretation = "Strategy exhibits inconsistent performance across scenarios. Parameter refinement recommended."
-                        
-                        st.markdown(f"""
-                        <div style="background: rgba(30, 41, 59, 0.4); padding: 20px; border-radius: 12px; border: 1px solid {status_color}30; margin-top: 20px;">
-                            <p style="margin: 0 0 10px 0; color: {status_color}; font-weight: 700; font-size: 15px;">{status_text}</p>
-                            <p style="margin: 0; color: #9CA3AF; line-height: 1.6;">
-                                {interpretation}<br/><br/>
-                                <strong style="color: #FFFFFF;">Monte Carlo Analysis Complete:</strong><br/>
-                                • {n_simulations} simulations executed<br/>
-                                • Block size: {block_size} days (preserves autocorrelation)<br/>
-                                • Win rate: {win_rate:.1f}%<br/>
-                                • Median CAGR: {median_cagr:.2f}%<br/>
-                                • {confidence_level}% confidence interval: [{mc_df['CAGR'].quantile(lower_pct/100):.2f}%, {mc_df['CAGR'].quantile(upper_pct/100):.2f}%]
-                            </p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        st.success("✓ Monte Carlo validation complete - Statistical robustness assessed")
+                            st.warning("⚠ REQUIRES REVIEW")
                     else:
-                        st.error("⚠ Monte Carlo validation encountered insufficient data")
+                        st.error("⚠ Validation failed")
 
-# Footer
 st.markdown("---")
 st.markdown("""
-<div style="text-align: center; color: #6B7280; font-size: 11px; padding: 20px 0; font-family: 'IBM Plex Mono', monospace;">
-    <p style="margin: 0;">PREDICT. INSTITUTIONAL ANALYTICS PLATFORM v4.0</p>
-    <p style="margin: 5px 0 0 0;">Risk Analytics • Portfolio Optimization • Quantitative Research</p>
+<div style="text-align: center; color: #6B7280; font-size: 11px; padding: 20px 0;">
+    <p style="margin: 0;">PREDICT. INSTITUTIONAL ANALYTICS v4.0</p>
 </div>
 """, unsafe_allow_html=True)
