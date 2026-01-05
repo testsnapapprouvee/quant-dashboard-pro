@@ -10,11 +10,39 @@ from pages_internal import strategy as strategy_page
 from pages_internal import risk as risk_page
 from pages_internal import predict as predict_page
 
-st.set_page_config(page_title="Mini Dashboard", layout="wide")
-st.title("📊 Mini Dashboard ETF")
+# ----------------------------
+# --- CONFIG PAGE ---
+# ----------------------------
+st.set_page_config(page_title="Predict Dashboard", layout="wide")
+st.markdown(
+    """
+    <style>
+    /* Fond global sombre */
+    .stApp {
+        background-color: #121212;
+        color: #E0E0E0;
+    }
+    /* Sidebar sombre */
+    .css-1d391kg {background-color: #1F1F1F;}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 # ----------------------------
-# --- MENU HORIZONTAL AVEC BOUTONS ---
+# --- TITRE PREDICT ---
+# ----------------------------
+st.markdown(
+    """
+    <h1 style="font-family:sans-serif; font-size:48px; color:#E0E0E0;">
+        Pred<span style="color:#8A2BE2;">i</span>ct
+    </h1>
+    """,
+    unsafe_allow_html=True
+)
+
+# ----------------------------
+# --- BOUTONS HORIZONTAUX ---
 # ----------------------------
 buttons = ["Dashboard", "Metrics", "Strategy", "Risk", "Predict"]
 cols = st.columns(len(buttons))
@@ -22,26 +50,59 @@ cols = st.columns(len(buttons))
 if "page" not in st.session_state:
     st.session_state["page"] = "Dashboard"
 
-# Gestion des clics sur boutons
 for i, name in enumerate(buttons):
-    if cols[i].button(name):
+    is_active = st.session_state["page"] == name
+    btn_color = "#8A2BE2" if is_active else "#1F1F1F"
+    btn_text = "#000000" if is_active else "#E0E0E0"
+    cols[i].markdown(
+        f"""
+        <div style="
+            background-color:{btn_color};
+            color:{btn_text};
+            text-align:center;
+            padding:10px 20px;
+            border-radius:8px;
+            font-weight:bold;
+            cursor:pointer;
+            border:1px solid #333333;
+        ">{name}</div>
+        """,
+        unsafe_allow_html=True
+    )
+    if cols[i].button("", key=f"hidden_{i}"):
         st.session_state["page"] = name
 
 page = st.session_state["page"]
+
+# ----------------------------
+# --- SELECTEUR DE PERIODE ---
+# ----------------------------
+date_options = ["YTD", "1Y", "3Y", "5Y", "2022", "Custom"]
+selected_period = st.selectbox("Select Period", date_options, index=0)
+
+today = datetime.today()
+if selected_period == "YTD":
+    start_date = datetime(today.year, 1, 1)
+elif selected_period == "1Y":
+    start_date = today - timedelta(days=365)
+elif selected_period == "3Y":
+    start_date = today - timedelta(days=365*3)
+elif selected_period == "5Y":
+    start_date = today - timedelta(days=365*5)
+elif selected_period == "2022":
+    start_date = datetime(2022, 1, 1)
+else:
+    start_date = st.date_input("Start Date", today - timedelta(days=180))
+end_date = st.date_input("End Date", today)
 
 # ----------------------------
 # --- PAGE DASHBOARD ---
 # ----------------------------
 if page == "Dashboard":
 
-    # --- Sidebar: Inputs ---
     tickers_input = st.text_input("Tickers (Risk, Safe)", "LQQ.PA, PUST.PA")
     tickers = [t.strip().upper() for t in tickers_input.split(",")]
 
-    start_date = st.date_input("Start Date", datetime.now() - timedelta(days=180))
-    end_date = st.date_input("End Date", datetime.now())
-
-    # --- Data Load ---
     @st.cache_data(ttl=3600)
     def load_data(tickers, start, end):
         price_map = {}
@@ -86,7 +147,19 @@ if page == "Dashboard":
 
         st.write("### Metrics")
         metrics_df = pd.DataFrame(metrics, index=["Total Return", "CAGR", "Max Drawdown"]).T
-        st.table(metrics_df)
+        st.markdown(
+            metrics_df.to_html(classes="table", index=True), 
+            unsafe_allow_html=True
+        )
+        st.markdown(
+            """
+            <style>
+                .table { color:#E0E0E0; background-color:#1F1F1F; border:1px solid #333333; }
+                .table th, .table td { border: 1px solid #333333; padding:5px; }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
 
 # ----------------------------
 # --- PAGE METRICS ---
